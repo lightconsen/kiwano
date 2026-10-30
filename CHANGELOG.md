@@ -30,10 +30,9 @@ stopping and removed *the name*, which by then belonged to its successor. The
 data plane kept working and the app's every screen read "Couldn't read this
 screen's data" until a restart.
 
-The stop now removes only the socket file it created, identified by device and
-inode, so a gateway that outlives its replacement leaves the replacement's
-socket alone. A test drives exactly that sequence, and fails if the identity
-check is removed.
+The stop now removes the socket file only when nothing answers on it, so a
+gateway that outlives its replacement leaves the replacement's socket alone. A
+test drives exactly that sequence, and fails if the check is removed.
 
 If you are already on 0.4.0 and the app shows nothing, quit it, delete
 `~/.kiwano/admin.sock`, and reopen — the updater's own signature is unaffected,

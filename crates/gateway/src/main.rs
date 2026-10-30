@@ -143,12 +143,6 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    // The socket file this process created, read once while the path still
-    // certainly names it. `cleanup` at the bottom compares against this: by then
-    // a successor may have bound the same name, and removing by path alone would
-    // delete *its* socket — the 0.3.13 → 0.4.0 upgrade failure, where an orderly
-    // stop outlived its replacement and every screen in the app came up empty.
-    let bound_socket = admin_listener.socket_file();
 
     // The cross-machine listener, when one was asked for. Resolved **after** the
     // local plane is up so a bad address fails a running gateway rather than a
@@ -279,10 +273,12 @@ async fn main() {
         .map(|_| ()),
     };
     // Remove the socket file an orderly stop would otherwise leave for the next
-    // bind to reclaim — but only if the name still points at the file *this*
-    // process bound. Best-effort either way: a crash leaves the file, and `bind`
-    // handles that, so this is tidiness rather than correctness.
-    admin_endpoint.cleanup(bound_socket);
+    // bind to reclaim — unless something is answering on it, which means a
+    // replacement already owns the name. Best-effort either way: a crash leaves
+    // the file, and `bind` handles that, so this is tidiness rather than
+    // correctness. See the note on `cleanup` for why it probes rather than
+    // comparing the file's identity.
+    admin_endpoint.cleanup();
     if let Err(e) = served {
         tracing::error!(error = %e, "gateway terminated");
         std::process::exit(1);

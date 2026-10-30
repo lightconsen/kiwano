@@ -362,14 +362,9 @@ impl AdminEndpoint {
             // `0777 & !umask` (0755 for the usual umask 022), so without this
             // any local process could drive `/shutdown` through it.
             set_socket_owner_only(path)?;
-            // Record which file we just created, before returning: this is what
-            // `cleanup` compares against, so that a stop which outlives its
-            // replacement cannot delete the replacement's socket. See the note
-            // on `cleanup`.
             Ok(AdminListener {
                 inner: listener,
                 describe: self.describe(),
-                socket: SocketFile::of(path),
             })
         }
         #[cfg(windows)]
@@ -389,9 +384,6 @@ impl AdminEndpoint {
                     pending: Some(create_pipe_instance(name)?),
                 },
                 describe: self.describe(),
-                // A pipe is a kernel object with no filesystem entry, so there
-                // is nothing to identify and nothing for cleanup to compare.
-                socket: None,
             })
         }
     }
@@ -518,100 +510,69 @@ impl AdminEndpoint {
         }
     }
 
-    /// Best-effort removal of the endpoint's filesystem entry — but only the
-    /// one `bound` names. The gateway calls this after its serve loop returns
-    /// so an orderly stop leaves no socket file behind;
+    /// Best-effort removal of the endpoint's filesystem entry — but only when
+    /// nothing answers on it. The gateway calls this after its serve loop
+    /// returns so an orderly stop leaves no socket file behind;
     /// [`bind`](AdminEndpoint::bind) reclaims one that a crash left anyway.
     ///
-    /// # Why this takes an argument
+    /// # Why this probes instead of comparing identity
     ///
-    /// A path is not an identity, and this path has exactly one interesting
-    /// property: whoever holds it next will be a *different* gateway. During an
-    /// app upgrade the replacement binds the socket while the outgoing gateway
-    /// is still finishing its stop (its listener closes first, the WAL
-    /// checkpoint after), and the outgoing one's cleanup then ran against a name
-    /// that no longer described its own file. That deleted the successor's
-    /// socket: the new daemon kept serving the data plane, its admin plane
-    /// became unreachable, and every screen in the app read as
-    /// "Couldn't read this screen's data" until a restart. Seen on the
+    /// A path is not an identity. During an app upgrade the replacement binds
+    /// the socket while the outgoing gateway is still finishing its stop (its
+    /// listener closes first, the WAL checkpoint after), so the outgoing one's
+    /// cleanup ran against a name that no longer described its own file. That
+    /// deleted the successor's socket: the new daemon kept serving the data
+    /// plane, its admin plane became unreachable, and every screen in the app
+    /// read "Couldn't read this screen's data" until a restart. Seen on the
     /// 0.3.13 → 0.4.0 upgrade.
     ///
-    /// So the identity is carried: `bound` is the socket file this process
-    /// created (see [`AdminListener::socket_file`]), and the file on disk is
-    /// compared against it. Equal — ours, remove it. Different — someone else
-    /// rebound the name; leave it alone.
-    pub fn cleanup(&self, bound: Option<SocketFile>) {
+    /// The first attempt at fixing this carried the socket's `(device, inode)`
+    /// from `bind` and removed the file only when it still matched. **That is
+    /// unsound, and Linux caught it**: ext4 and overlayfs hand a new file the
+    /// number a just-unlinked one freed, so the successor's socket can compare
+    /// equal to the predecessor's record and be deleted exactly as before. It
+    /// passed on APFS, which does not reuse numbers, and failed in CI.
+    ///
+    /// So the question is not "is this file mine" but "is anyone answering at
+    /// this name" — a property of the *present* endpoint rather than of the
+    /// past file, and the same probe [`bind`](AdminEndpoint::bind) already uses
+    /// to tell a live gateway from a corpse. Ours has closed its listener by the
+    /// time this runs, so anything that accepts is a successor's.
+    ///
+    /// The remaining window — a successor binding between this probe and the
+    /// `unlink` below — is microseconds rather than the seconds that made the
+    /// bug, and shrinking it further would take a lock file that outlives the
+    /// process. Not worth it for a tidiness step on a crash-safe path: a file
+    /// left behind is reclaimed by the next `bind`.
+    pub fn cleanup(&self) {
         #[cfg(unix)]
         {
             let AdminEndpoint::Local(path) = self else {
                 // A TCP listener leaves nothing behind to clean up.
                 return;
             };
-            let Some(bound) = bound else {
-                // Nothing was bound through this process, so there is nothing of
-                // ours to remove — removing by path here is the bug above.
+            if !path.exists() {
+                // Already gone, which is the state this was trying to reach.
                 return;
-            };
-            match SocketFile::of(path) {
-                Some(current) if current != bound => {
-                    tracing::info!(
-                        path = %path.display(),
-                        "the admin socket was rebound by another gateway; leaving it to its owner"
-                    );
-                }
-                Some(_) => {
-                    if let Err(e) = std::fs::remove_file(path) {
-                        // Not an error worth a warning on the happy path: the
-                        // file may already be gone, and a leftover is reclaimed
-                        // on next bind.
-                        tracing::debug!(path = %path.display(), error = %e, "admin socket not removed");
-                    }
-                }
-                None => {
-                    // Already gone, which is the state this was trying to reach.
-                    tracing::debug!(path = %path.display(), "admin socket was already gone");
-                }
+            }
+            if std::os::unix::net::UnixStream::connect(path).is_ok() {
+                tracing::info!(
+                    path = %path.display(),
+                    "another gateway is serving this admin socket; leaving it to its owner"
+                );
+                return;
+            }
+            if let Err(e) = std::fs::remove_file(path) {
+                // Not an error worth a warning on the happy path: the file may
+                // already be gone, and a leftover is reclaimed on next bind.
+                tracing::debug!(path = %path.display(), error = %e, "admin socket not removed");
             }
         }
         #[cfg(windows)]
         {
-            // A kernel object: it went away with the last handle. Nothing to
-            // compare and nothing to remove.
-            let _ = bound;
+            // A kernel object: it went away with the last handle, and nothing is
+            // left behind to collide with.
         }
-    }
-}
-
-/// The identity of the socket file a listening gateway created.
-///
-/// Carried from [`AdminEndpoint::bind`] — through
-/// [`AdminListener::socket_file`] — into [`AdminEndpoint::cleanup`], and the
-/// reason cleanup takes an argument at all: see the note there.
-///
-/// Device **and** inode, because an inode number alone is only unique within one
-/// filesystem, and `KIWANO_ADMIN_SOCKET` may put the socket on another one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SocketFile {
-    #[cfg(unix)]
-    dev: u64,
-    #[cfg(unix)]
-    ino: u64,
-}
-
-#[cfg(unix)]
-impl SocketFile {
-    /// What is at `path` right now, if anything.
-    ///
-    /// `symlink_metadata`, not `metadata`: the question is what the name refers
-    /// to in this directory, and following a link would answer about a file that
-    /// is not the socket at all.
-    fn of(path: &Path) -> Option<Self> {
-        use std::os::unix::fs::MetadataExt;
-        let md = std::fs::symlink_metadata(path).ok()?;
-        Some(Self {
-            dev: md.dev(),
-            ino: md.ino(),
-        })
     }
 }
 
@@ -697,20 +658,6 @@ pub struct AdminListener {
     inner: PipeListener,
     /// Reported by `local_addr`; axum logs it and nothing reads it back.
     describe: String,
-    /// The socket file this listener created, when there is one — the identity
-    /// [`AdminEndpoint::cleanup`] compares against before removing it. `None` on
-    /// Windows, where a pipe leaves no file behind.
-    socket: Option<SocketFile>,
-}
-
-impl AdminListener {
-    /// The socket file this process bound, for [`AdminEndpoint::cleanup`].
-    ///
-    /// Taken from the listener rather than re-read from the path at stop time:
-    /// the path may name a successor's socket by then, which is the whole point.
-    pub fn socket_file(&self) -> Option<SocketFile> {
-        self.socket
-    }
 }
 
 impl Listener for AdminListener {
@@ -1338,7 +1285,7 @@ mod tests {
         assert!(err.to_string().contains("AdminTcp"), "{err}");
 
         // Cleanup is a no-op for it too: there is no socket file to remove.
-        endpoint.cleanup(None);
+        endpoint.cleanup();
     }
 
     #[test]
@@ -1445,27 +1392,33 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let endpoint = test_endpoint(dir.path());
         let listener = endpoint.bind().await.expect("bind");
-        let bound = listener.socket_file();
         assert!(endpoint.path().exists());
         drop(listener);
 
-        endpoint.cleanup(bound);
+        endpoint.cleanup();
         assert!(
             !endpoint.path().exists(),
             "a stopped gateway does not leave its socket behind"
         );
         // And it is a no-op rather than an error when there is nothing there.
-        endpoint.cleanup(bound);
+        endpoint.cleanup();
     }
 
-    /// The failure that made `cleanup` take an argument: a stop that outlives
-    /// its replacement must not delete the replacement's socket.
+    /// The failure that made `cleanup` probe at all: a stop that outlives its
+    /// replacement must not delete the replacement's socket.
     ///
     /// The sequence is the 0.3.13 → 0.4.0 upgrade. The outgoing gateway asks
     /// `/shutdown`, and the app spawns the new one as soon as the admin listener
     /// closes — before the process is gone, because a WAL checkpoint still has
     /// to run. The new one finds the name taken but dead, removes it and binds
     /// its own. Seconds later the old one reaches `cleanup`.
+    ///
+    /// What is asserted is the property, not a mechanism: the replacement's
+    /// socket must still be there *and still serve*. A fix that compared the
+    /// file's identity passed this on APFS and failed on Linux, where the new
+    /// socket reuses the unlinked file's inode — so "is the file still there"
+    /// alone would not have caught it. Any acceptance of a connection is the
+    /// replacement being alive, whatever the numbers say.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_stop_that_outlives_its_replacement_leaves_the_new_socket_alone() {
@@ -1473,49 +1426,50 @@ mod tests {
         let endpoint = test_endpoint(dir.path());
 
         let outgoing = endpoint.bind().await.expect("outgoing binds");
-        let outgoing_socket = outgoing.socket_file();
-        assert!(outgoing_socket.is_some(), "a unix bind records its file");
         // The listener closes early in a graceful stop; the process outlives it.
         drop(outgoing);
 
-        // The replacement reclaims the corpse and binds — a new inode under the
-        // same name, which is what makes this test mean anything.
+        // The replacement reclaims the corpse and binds under the same name.
         let replacement = endpoint.bind().await.expect("replacement binds");
         let replacement_path = endpoint.path().to_path_buf();
         assert!(replacement_path.exists());
 
         // Now the outgoing process finishes stopping.
-        endpoint.cleanup(outgoing_socket);
+        endpoint.cleanup();
         assert!(
             replacement_path.exists(),
-            "the outgoing gateway must not delete a socket it does not own"
+            "the outgoing gateway must not delete a socket another one is serving"
+        );
+        assert!(
+            std::os::unix::net::UnixStream::connect(&replacement_path).is_ok(),
+            "and the replacement must still be reachable at that name"
         );
 
-        // And the replacement's own stop still cleans up after it.
-        let replacement_socket = replacement.socket_file();
+        // The replacement's own stop still tidies up after it.
         drop(replacement);
-        endpoint.cleanup(replacement_socket);
+        endpoint.cleanup();
         assert!(
             !replacement_path.exists(),
-            "the owner's cleanup still removes its own socket"
+            "nothing is listening any more, so the file is the owner's to remove"
         );
     }
 
-    /// A gateway that never bound anything has nothing to remove, so it must not
-    /// remove whatever happens to be at the path.
+    /// A file nobody is listening on is the corpse `bind` already reclaims, so a
+    /// stop removes it rather than leaving it for the next start.
     #[cfg(unix)]
     #[tokio::test]
-    async fn cleanup_without_a_bind_removes_nothing() {
+    async fn cleanup_removes_a_socket_nothing_is_serving() {
         let dir = tempfile::tempdir().unwrap();
         let endpoint = test_endpoint(dir.path());
         let listener = endpoint.bind().await.expect("bind");
         assert!(endpoint.path().exists());
-
-        endpoint.cleanup(None);
-        assert!(
-            endpoint.path().exists(),
-            "not knowing which file is ours means not deleting one"
-        );
+        // The listener is gone but the file is not: exactly what a crash leaves.
         drop(listener);
+
+        endpoint.cleanup();
+        assert!(
+            !endpoint.path().exists(),
+            "an unserved socket file is a leftover, not someone else's endpoint"
+        );
     }
 }

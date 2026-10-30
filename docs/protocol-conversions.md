@@ -90,9 +90,10 @@ Codex 0.149 起删掉了 chat wire，Kiwano 的接管也强制 `wire_api = "resp
 
 ## 配套缺口（做转换时必须一起决定）
 
-- **`/v1/messages/count_tokens`**：Anthropic 客户端会调它。转换上游目前一律
-  `protocol_mismatch`——转换腿只认 `path == "/v1/messages"`。要么估算并按 Anthropic
-  形状返回，要么在错误里说清、并确认客户端能容忍失败。
+- **`/v1/messages/count_tokens`**：Anthropic 客户端会调它。转换上游**不再一律
+  `protocol_mismatch`**：网关本地估算（文本 ~4 字符/token、图片块固定 1500、
+  不向 usage 表写行），并按 Anthropic 形状返回 `{"input_tokens": N}`。
+  估算的误差方向是刻意选的——宁多勿少，多算提前 compact，少算会把请求打爆。
 - **Chat / Responses 转 Anthropic 的拒绝项**：`response_format` 的两种 JSON 形式、
   `n > 1`、`logprobs`、音频/文件/未知内容 part、非 function 工具、非法工具名都会得到
   自带原因的 422。调参类字段（penalties、seed、logit_bias、reasoning_effort）被丢弃，

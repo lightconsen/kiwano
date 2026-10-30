@@ -39,6 +39,7 @@ pub mod convert;
 pub mod convert_chat;
 pub mod convert_responses;
 pub mod convert_responses_anthropic;
+pub mod count_tokens;
 pub mod finish;
 pub mod headers;
 pub mod inbound;

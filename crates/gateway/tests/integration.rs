@@ -3420,6 +3420,68 @@ async fn count_tokens_is_sanitized_like_messages() {
         .contains("thinking: removed unsupported type \"adaptive\""));
 }
 
+/// count_tokens against an OpenAI-only provider cannot be forwarded — there is
+/// no such endpoint upstream. The gateway answers locally with an estimate and
+/// logs the row as a success, so the context-window check that Claude Code runs
+/// before every request is not a per-request error any more. Nothing is
+/// metered: no tokens crossed the wire, so no usage row may appear.
+#[tokio::test]
+async fn count_tokens_is_estimated_for_a_conversion_upstream() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // An Anthropic-path client bound to an OpenAI-protocol provider: the
+    // mismatch that used to answer every count_tokens with 502.
+    let (url, _captured) = mock_openai(MockReply::Json(json!({
+        "id": "chatcmpl-x",
+        "object": "chat.completion",
+        "choices": [],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-openai", Protocol::OpenAI, url))
+        .unwrap();
+    store
+        .upsert_binding(&bind("claude", "p-openai", 0))
+        .unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let text = "x".repeat(400);
+    let body = serde_json::json!({
+        "model": "deepseek/deepseek-v4.1-flash",
+        "messages": [{ "role": "user", "content": text }],
+    });
+    let response = post_json(
+        &app,
+        "/v1/messages/count_tokens",
+        Some("kw-ag-claude-test"),
+        &serde_json::to_string(&body).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let answer: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    let count = answer["input_tokens"].as_u64().expect("a token count");
+    assert!(count > 0, "the estimate is never zero for a real request");
+    assert!(count < 10_000, "an estimate, not a byte count: {count}");
+
+    // The row is a success, and says so: estimated, not metered.
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(rows[0].status_code, 200);
+    assert_eq!(rows[0].error_kind, None);
+    assert!(rows[0]
+        .request_notes
+        .as_deref()
+        .unwrap_or_default()
+        .contains("estimate"));
+    let totals = state.store.usage_totals(None, None, None).unwrap();
+    assert_eq!(totals.requests, 0, "an estimate is not a billed request");
+}
+
 /// The SSE path persists its log row in `SseUsageStream::finish`, a different
 /// writer than the buffered one — the notes must survive that handoff.
 #[tokio::test]

@@ -186,6 +186,14 @@ pub async fn forward(
                 .await;
             }
             InboundResolution::Mismatch { message } => {
+                // count_tokens is the one path where a mismatch is a gap the
+                // gateway can close itself: the client is asking how much
+                // context it has left, not for an upstream answer. Estimate and
+                // answer in the Anthropic shape rather than failing a check
+                // that runs before every request. See `forward/count_tokens.rs`.
+                if path == "/v1/messages/count_tokens" {
+                    return answer_count_tokens(state, body, log, &routed, inbound, started);
+                }
                 log_failure(
                     &state,
                     log.as_ref(),
@@ -209,7 +217,6 @@ pub async fn forward(
         url.push('?');
         url.push_str(q);
     }
-
     let (headers, upstream_key) = match upstream_key_and_headers(
         &state,
         provider,
@@ -430,6 +437,102 @@ pub async fn forward(
         };
         buffered_response(&state, bytes, sample, status, response_headers)
     }
+}
+
+/// Answer `POST /v1/messages/count_tokens` locally, for an upstream that has
+/// no such endpoint.
+///
+/// The client is asking how much of its context window is spent — a question
+/// the gateway can answer approximately from the bytes it already holds, and
+/// the wrong direction of error is known: over-counting compacts early, which
+/// costs a turn; under-counting runs out of window mid-turn, which costs the
+/// request. See `forward/count_tokens.rs` for how the number is made.
+///
+/// The row in the request log says what happened: status 200, no error, and a
+/// note that the count is an estimate — so a reader of the audit trail is not
+/// misled into thinking the upstream answered. **No usage row is written**:
+/// the number is an approximation for context management, not a billing fact,
+/// and nothing was sent upstream to be metered.
+fn answer_count_tokens(
+    state: Arc<GatewayState>,
+    body: Bytes,
+    log: Option<CompletedLog>,
+    routed: &RoutedRequest,
+    inbound: Option<Protocol>,
+    started: Instant,
+) -> Response {
+    let Some(tokens) = crate::forward::count_tokens::estimate(&body) else {
+        // The client asked a question about a body we cannot parse. A 400 with
+        // the reason is more useful than an estimate of nothing.
+        return error_response(
+            inbound,
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "kiwanod: the request body is not JSON",
+        );
+    };
+    let bytes = Bytes::from(serde_json::json!({ "input_tokens": tokens }).to_string());
+    let latency_ms = started.elapsed().as_millis() as i64;
+
+    if let Some(mut l) = log {
+        l.status_code = 200;
+        l.response_size = bytes.len() as i64;
+        l.response_body = Some(String::from_utf8_lossy(&bytes).into_owned());
+        l.request_notes = Some(
+            "count_tokens answered locally: the upstream has no such endpoint, so this is an \
+             estimate (≈4 chars/token; images count 1500 each), not a metered count"
+                .to_string(),
+        );
+        // A success row without usage: the request log's persistence path for
+        // a request that was answered but not metered.
+        let store = state.store.clone();
+        let entry = crate::store::RequestLogNew {
+            ts: l.capture.ts.clone(),
+            method: l.capture.method.clone(),
+            path: l.capture.path.clone(),
+            query: l.capture.query.clone(),
+            agent: Some(routed.agent.clone()),
+            attribution: Some(attribution_str(routed.attribution)),
+            provider_id: Some(routed.provider.id.clone()),
+            model: crate::meter::request_model(&body),
+            status_code: 200,
+            error_kind: None,
+            error_message: None,
+            session_id: l.capture.session_id.clone(),
+            is_streaming: false,
+            input_tokens: tokens as i64,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
+            latency_ms: Some(latency_ms),
+            first_token_ms: None,
+            request_headers: l.capture.request_headers.clone(),
+            response_headers: None,
+            request_body: l.capture.request_body.clone(),
+            response_body: l.response_body.clone(),
+            request_size: l.capture.request_size,
+            response_size: l.response_size,
+            truncated: l.capture.truncated,
+            // No cost: nothing was sent, nothing is owed.
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+            request_notes: l.request_notes,
+            upstream_key: None,
+        };
+        if let Err(e) = store.insert_request_log(&entry) {
+            tracing::warn!(error = %e, "failed to persist count_tokens estimate");
+        }
+    }
+
+    let mut response = Response::new(axum::body::Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert("content-type", "application/json".parse().unwrap());
+    response
 }
 
 #[cfg(test)]

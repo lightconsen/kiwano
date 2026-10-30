@@ -27,6 +27,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   thread, so the whole app stopped answering while it did. The page now renders
   at most the first 256 KB of each body, expands in place on request, and Copy
   still carries the whole capture.
+- **`POST /v1/messages/count_tokens` against a conversion upstream gets an
+  answer, not a 502.** Claude Code calls it before every request to size its
+  context window, and an OpenAI-only provider has no such endpoint to forward
+  to. The gateway now estimates — text at roughly four characters per token,
+  each image at 1500 — and answers in Anthropic's shape. The error direction is
+  deliberate: over-counting compacts a turn early; under-counting runs out of
+  window mid-turn. Nothing is metered for it.
 
 ## [0.4.1] - 2026-10-30
 

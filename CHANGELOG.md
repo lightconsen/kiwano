@@ -19,7 +19,25 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-10-30
+## [0.4.1] - 2026-10-30
+
+**The version where upgrading no longer blanks the app.** 0.4.0 introduced a
+race in the gateway's orderly stop: it asked `/shutdown`, and the app spawned
+the replacement as soon as the outgoing gateway's admin socket closed — seconds
+before that process was actually gone, because a SQLite checkpoint still had to
+run. The replacement binds the same socket; the outgoing one then finished
+stopping and removed *the name*, which by then belonged to its successor. The
+data plane kept working and the app's every screen read "Couldn't read this
+screen's data" until a restart.
+
+The stop now removes only the socket file it created, identified by device and
+inode, so a gateway that outlives its replacement leaves the replacement's
+socket alone. A test drives exactly that sequence, and fails if the identity
+check is removed.
+
+If you are already on 0.4.0 and the app shows nothing, quit it, delete
+`~/.kiwano/admin.sock`, and reopen — the updater's own signature is unaffected,
+so 0.4.1 arrives the usual way.
 
 **The version signed by the LLC.** The Apple Developer membership moved from a
 personal account to LightConsen LLC, and the macOS builds are now signed

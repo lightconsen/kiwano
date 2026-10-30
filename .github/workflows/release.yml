@@ -772,8 +772,8 @@ jobs:
           # Apple signing + notarization. Tauri imports the .p12 into a
           # temporary keychain itself, so there is no security(1) dance here.
           # The identity is a secret rather than a tauri.conf.json value because
-          # it carries a personal name, and this is expected to become the LLC's
-          # when the membership converts.
+          # it changes when the Apple membership does — it went from a personal
+          # name to the LLC's in 0.4.0 — and a rebuild should not need a commit.
           #
           # APPLE_CERTIFICATE, APPLE_SIGNING_IDENTITY and APPLE_API_KEY_PATH are
           # deliberately *not* repeated here: the steps above export them

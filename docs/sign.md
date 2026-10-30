@@ -1,7 +1,7 @@
 # Kiwano 代码签名与发布可信度（docs/sign.md）
 
 > 目标：记录各平台的签名现状、已经落地的机制，以及**刻意推迟**的决定与触发条件。
-> 现状基线：v0.1.7，发布流水线见 `.github/workflows/release.yml`（设计背景见 `docs/upgrade.md` §5）。
+> 现状基线：v0.4.0，发布流水线见 `.github/workflows/release.yml`（设计背景见 `docs/upgrade.md` §5）。
 > 本文不重复 `upgrade.md` 的更新机制设计，只讲「谁签的、凭什么、还差什么」。
 
 ## 0. 现状一览
@@ -13,8 +13,14 @@
 | Linux | `.AppImage` | ✅ 仅 updater 的 minisign `.sig` | ✅ 客户端验签 | Tauri updater（minisign） |
 | Linux | `.deb` / `.rpm` | ❌ 未签名（也无 GPG 源签名） | — | 不参与自动更新 |
 
-macOS 的签名主体是 **个人账号**（`Developer ID Application: Jianxin Yang (7WT4583592)`），
-不是组织。这一点在 §3 的 Windows 决策里是硬约束。
+macOS 的签名主体是 **组织账号** —— `Developer ID Application: LightConsen LLC
+(7WT4583592)`（2026-10-30 起；此前是个人账号 `Jianxin Yang`，同名 Team ID）。
+转换组织时 **Team ID 与公证 Issuer 都没有变**，变的只有证书与 App Store Connect
+密钥：所以 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、
+`APPLE_SIGNING_IDENTITY`、`APPLE_API_KEY`、`APPLE_API_PRIVATE_KEY` 五个换新，
+`APPLE_API_ISSUER` 照旧。这一状态是在 `v0.3.13-rc.1` 彩排上端到端验证的（两条
+macOS 腿都 `signed, notarized and stapled`）。组织身份在 §3 的 Windows 决策里是
+硬约束。
 
 三个平台的更新链都靠 **Tauri updater 的 minisign 签名**，与操作系统级的代码签名是两套东西：
 `.sig` 文件只保护 App 内更新，对 SmartScreen / Gatekeeper 没有任何作用（见 §1.1）。
@@ -122,7 +128,8 @@ updater 的信任根就是这个编译进 App 的公钥：能改它的人可以�
 
 **有意发布未签名版本**时不要删密钥，改用仓库变量 `ALLOW_UNSIGNED_BUILD=true`
 （同样是只有管理员能改的仓库外开关）：即使密钥齐全也强制降级，并打印一条专门的 warning。
-触发条件是证书主体从个人转为 LLC 期间需要发 hotfix。
+它存在的场景是「密钥正处于半换装或暂时不可用时仍需发 hotfix」——例如 2026-10-30
+个人 → 组织的那次换证（当时六个 secret 是一次性一起换的，所以实际没有用上）。
 
 > 与 §1.5 的差别是有意的：`EXPECTED_UPDATER_PUBKEY` 未配置时**故意失败**，
 > 因为那是一条「未配置就跳过自己」的安全检查；签名能力则是环境事实，
@@ -145,14 +152,19 @@ updater 的信任根就是这个编译进 App 的公钥：能改它的人可以�
 
 | 方案 | 可行性 | 成本 | 得到什么 |
 |---|---|---|---|
-| Azure Trusted Signing | ❌ 个人身份验证已暂停，且个人仅限美国/加拿大 | — | — |
+| Azure Trusted Signing | ❌ 个人身份验证已暂停，且个人仅限美国/加拿大；**组织**（美国/加拿大注册）现可申请，$9.99/月 | 低 | Authenticode，发布者显示为组织 |
 | **SignPath Foundation** | ✅ GPL-3.0-or-later 符合其 OSI 许可要求，但信誉评估为自由裁量 | **免费** | Authenticode，**证书主体为 SignPath Foundation** 而非 Kiwano |
-| OV 证书 + 云 HSM（SSL.com eSigner / DigiCert KeyLocker） | ✅ 个人可申请 | ~$200–500/年 | 目标 A，**不含目标 B** |
+| OV 证书 + 云 HSM（SSL.com eSigner / DigiCert KeyLocker） | ✅ 组织可申请 | ~$200–500/年 | 目标 A，**不含目标 B** |
 | 不签，文档写清 | ✅ 现状 | 0 | — |
 
-**结论：不急。** 花 $300/年买到的是发布者名字好看，弹窗仍在；对 0.1.x 的项目，
+**结论：不急。** 花 $300/年买到的是发布者名字好看，弹窗仍在；对 0.x 的项目，
 这笔钱的边际收益不成立。README 与 release body 已经写清 SmartScreen 的绕过步骤，
 那才是当前最有效的缓解。
+
+> **2026-10-30 更新**：账号已转为 LightConsen LLC，Azure Trusted Signing 的组织
+> 门槛（美国注册实体）现在满足了，$9.99/月的价格把这一项从「不划算」变成
+> 「可以试」。它仍然只解决目标 A，所以没有跟着换证一起动手 —— 等 §3 第 9 项的
+> 触发条件成立时，它是比 OV + HSM 更便宜的第一个候选。
 
 ## 3. 待办与触发条件
 

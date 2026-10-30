@@ -19,6 +19,21 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-30
+
+**The version signed by the LLC.** The Apple Developer membership moved from a
+personal account to LightConsen LLC, and the macOS builds are now signed
+`Developer ID Application: LightConsen LLC (7WT4583592)` and notarized under
+it — Gatekeeper and Login Items show the company instead of a person. The Team
+ID did not change with the conversion, so nothing in the pipeline had to learn
+a new value: the identity string is parsed for it, and the verification steps
+pinned the new certificate the moment it was swapped in. The first launch after
+this update adds the login item again, because macOS attributes it by code
+signature — one extra "Background Items Added" notice, once.
+
+Nothing you run changes: the updater's own signature is minisign, unrelated to
+the Apple certificate, so installs update over this release as they always have.
+
 ### Fixed
 
 - **The request log's rows are one line tall, whatever the ids are.** An agent

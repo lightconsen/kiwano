@@ -19,6 +19,21 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-30
+
+**The version where the gateway stops inventing errors.** Three things it was
+answering on its own behalf are now answered as they were asked. A request log
+whose body ran to megabytes no longer freezes the window that opens it; a
+context-window check against a provider that has no such endpoint gets an
+estimate instead of a 502; and a breaker that opened because an upstream kept
+refusing the key replays that refusal — the vendor's own "invalid key" — instead
+of a 503 of the gateway's own making that read to every agent as "busy, retry".
+
+That last one is the one worth reading. One dead command-code key produced 149
+identical `circuit_open` rows in nine hours, because 503 means *try again* to
+every client that understands HTTP. The breaker was right to stop sending; it
+was wrong to explain itself. Nothing about the breaker's job changed.
+
 ### Fixed
 
 - **Opening a large request's detail no longer hangs the window.** Bodies are

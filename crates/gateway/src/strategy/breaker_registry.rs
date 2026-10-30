@@ -96,6 +96,26 @@ impl StrategyEngine {
         self.breaker(agent, provider_id).await.allow_request().await
     }
 
+    /// The body of the 401 the upstream last returned, when the breaker is open
+    /// on auth — what the gateway replays while it refuses to send. `None` when
+    /// the breaker is not in the auth-failed state, so callers never replay a
+    /// stale body for a provider that merely flaked.
+    pub async fn auth_rejection_body(&self, agent: &str, provider_id: &str) -> Option<String> {
+        self.breaker(agent, provider_id)
+            .await
+            .auth_rejection_body()
+            .await
+    }
+
+    /// Stash the body of a 401 the upstream just returned, for replay while the
+    /// breaker is open on auth.
+    pub async fn note_auth_rejection_body(&self, agent: &str, provider_id: &str, body: String) {
+        self.breaker(agent, provider_id)
+            .await
+            .note_auth_rejection_body(body)
+            .await;
+    }
+
     /// Feed back the result of one real upstream attempt (called by the forward
     /// layer once per attempt). `used_half_open_permit` is the flag from the
     /// matching [`StrategyEngine::allow`] — it releases the probe permit. The

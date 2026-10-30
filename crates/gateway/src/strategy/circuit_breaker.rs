@@ -115,6 +115,12 @@ pub struct CircuitBreaker {
     /// Whether the breaker is open *because the key is bad* — the mark the
     /// UI reads to say "fix the key", distinct from a provider outage.
     auth_failed: Arc<AtomicU32>,
+    /// The body of the 401 the upstream last returned, kept so an open breaker
+    /// can replay it instead of a gateway-invented 503: a client that is told
+    /// "key invalid" stops retrying, where "circuit open" just says try again.
+    /// `None` until the first rejection's body is captured (see
+    /// `forward::upstream::read_body_or_response`).
+    auth_rejection_body: Arc<RwLock<Option<String>>>,
 }
 
 /// Circuit breaker admission result
@@ -142,6 +148,7 @@ impl CircuitBreaker {
             rate_limited_until: Arc::new(RwLock::new(None)),
             consecutive_auth_failures: Arc::new(AtomicU32::new(0)),
             auth_failed: Arc::new(AtomicU32::new(0)),
+            auth_rejection_body: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -250,6 +257,9 @@ impl CircuitBreaker {
         *self.rate_limited_until.write().await = None;
         self.consecutive_auth_failures.store(0, Ordering::SeqCst);
         self.auth_failed.store(0, Ordering::SeqCst);
+        // The rejection body is stale the moment a key works again: replaying
+        // it after recovery would tell a client its key is bad when it is not.
+        *self.auth_rejection_body.write().await = None;
 
         // Reset the failure counter
         self.consecutive_failures.store(0, Ordering::SeqCst);
@@ -316,6 +326,30 @@ impl CircuitBreaker {
             return true;
         }
         false
+    }
+
+    /// Stash the body of a 401 the upstream just returned, so a breaker that
+    /// opens on auth can replay it instead of inventing a 503.
+    ///
+    /// Called from the body read, after `record_auth_rejected`: the forward leg
+    /// reads the body, and only then does the gateway have the upstream's words.
+    /// Overwritten by each new rejection, so the replayed answer is the most
+    /// recent one — a key that changed its error message changes what is
+    /// replayed.
+    pub async fn note_auth_rejection_body(&self, body: String) {
+        *self.auth_rejection_body.write().await = Some(body);
+    }
+
+    /// The 401 the upstream last returned, for replay while the breaker is open
+    /// on auth. `None` when the breaker is not in the auth-failed state — a
+    /// closed or merely-open breaker has nothing to replay — or when no body
+    /// was captured, in which case the caller falls back to a message it writes
+    /// itself.
+    pub async fn auth_rejection_body(&self) -> Option<String> {
+        if self.auth_failed.load(Ordering::SeqCst) == 0 {
+            return None;
+        }
+        self.auth_rejection_body.read().await.clone()
     }
 
     /// Whether the provider is inside the rate-limit pause it asked for.
@@ -693,5 +727,60 @@ mod tests {
         let stats = breaker.get_stats().await;
         assert_eq!(stats.state, CircuitState::Open);
         assert!(!stats.auth_failed, "opened for the outage, not the key");
+    }
+
+    /// The body of the 401 the upstream gave is kept so an open breaker can
+    /// replay it; the replay is the upstream's own refusal, not a 503 the
+    /// gateway invented.
+    #[tokio::test]
+    async fn an_auth_open_breaker_replays_the_rejection_body() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig::default());
+        breaker
+            .note_auth_rejection_body(r#"{"error":"bad key"}"#.to_string())
+            .await;
+        // Not open yet: nothing to replay until the mark is set.
+        assert_eq!(breaker.auth_rejection_body().await, None);
+
+        breaker.record_auth_rejected(false).await;
+        breaker.record_auth_rejected(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert_eq!(
+            breaker.auth_rejection_body().await.as_deref(),
+            Some(r#"{"error":"bad key"}"#),
+            "the replay is the upstream's own answer"
+        );
+    }
+
+    /// The replay is cleared on recovery: a probe that succeeds means the key
+    /// works now, and replaying the old rejection would be a lie.
+    #[tokio::test]
+    async fn the_rejection_body_is_dropped_on_recovery() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig::default());
+        breaker
+            .note_auth_rejection_body(r#"{"error":"bad key"}"#.to_string())
+            .await;
+        breaker.record_auth_rejected(false).await;
+        breaker.record_auth_rejected(false).await;
+        assert!(breaker.auth_rejection_body().await.is_some());
+
+        breaker.record_success(false).await;
+        assert_eq!(
+            breaker.auth_rejection_body().await,
+            None,
+            "a served request retires the cached refusal"
+        );
+    }
+
+    /// A breaker that opened on a plain outage has no auth body to replay —
+    /// replaying nothing, not inventing an auth answer for a network failure.
+    #[tokio::test]
+    async fn an_outage_open_breaker_has_nothing_to_replay() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig::default());
+        // The default failure threshold is 4, so four outages open it.
+        for _ in 0..4 {
+            breaker.record_failure(false).await;
+        }
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert_eq!(breaker.auth_rejection_body().await, None);
     }
 }

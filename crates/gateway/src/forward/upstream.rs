@@ -172,7 +172,23 @@ pub(crate) async fn read_body_or_response(
     inbound: Option<Protocol>,
 ) -> Result<Bytes, Response> {
     match read_upstream_body_capped(upstream, MAX_UPSTREAM_BODY_BYTES).await {
-        Ok(b) => Ok(b),
+        Ok(b) => {
+            // A 401's body is the reason the key was refused. Keep it so a
+            // breaker that opens on auth can replay the upstream's own answer
+            // while it refuses to send — the client then sees "invalid key",
+            // not a gateway-invented "circuit open" it would retry against.
+            if upstream.status() == StatusCode::UNAUTHORIZED {
+                state
+                    .engine
+                    .note_auth_rejection_body(
+                        &routed.agent,
+                        &provider.id,
+                        String::from_utf8_lossy(&b).into_owned(),
+                    )
+                    .await;
+            }
+            Ok(b)
+        }
         Err(e) => {
             let resp =
                 error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
@@ -279,6 +295,30 @@ pub(crate) async fn send_upstream(
         // free on the ordinary path.
         let admission = state.engine.allow(agent, &provider.id).await;
         if !admission.allowed {
+            // A breaker that opened on auth has a better answer than "circuit
+            // open": the 401 the upstream already gave. Replaying it keeps the
+            // refusal honest — the client sees the key is bad, in the shape the
+            // upstream used — and a refusal that names its reason is one an
+            // agent stops retrying, which the 503 this replaces did not.
+            if let Some(body) = state.engine.auth_rejection_body(agent, &provider.id).await {
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    capture,
+                    Some(agent.to_string()),
+                    Some(attribution.to_string()),
+                    Some(provider.id.clone()),
+                    StatusCode::UNAUTHORIZED,
+                    "auth_rejected",
+                    "replaying the upstream's 401 while the key is known bad".to_string(),
+                );
+                let mut resp = Response::new(axum::body::Body::from(body));
+                *resp.status_mut() = StatusCode::UNAUTHORIZED;
+                resp.headers_mut().insert(
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderValue::from_static("application/json"),
+                );
+                return Err(resp);
+            }
             // Not recorded as a failure: nothing was attempted, and a denial
             // counted as a failure would drive the breaker further open on its
             // own refusals.

@@ -2783,7 +2783,10 @@ async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
     }
 
     // The third request is refused before it leaves: the key is not going to
-    // start working, and the gateway knows it.
+    // start working, and the gateway knows it. What the client is told is the
+    // upstream's own 401 — replayed, not a gateway-invented 503, because a
+    // client that reads "key invalid" stops retrying and one that reads
+    // "circuit open" keeps coming back.
     let response = post_json(
         &app,
         "/v1/messages",
@@ -2791,7 +2794,12 @@ async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
         r#"{"model":"m"}"#,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(
+        body["error"]["message"], "the upstream refused it",
+        "the replayed body is the upstream's, verbatim: {body}"
+    );
     assert_eq!(
         hits.lock().unwrap().len(),
         2,
@@ -2839,6 +2847,106 @@ async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
         text.contains("kiwano_auth_failed") && text.contains("kiwano_auth_failed{route="),
         "the auth-failed gauge is missing: {text}"
     );
+}
+
+/// The replay is per (agent, provider) like the breaker itself: one agent's
+/// refused key must not make another agent's request look refused. A shared
+/// cache would be worse than the 503 this replaced, because it would name a
+/// problem the second agent does not have.
+#[tokio::test]
+async fn the_auth_replay_is_per_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // One upstream that refuses the first two calls and serves from the third:
+    // a key that is swapped while the breaker is open.
+    let calls = Arc::new(Mutex::new(0u32));
+    let upstream = Router::new()
+        .route(
+            "/v1/messages",
+            post(move || {
+                let calls = calls.clone();
+                async move {
+                    let n = {
+                        let mut c = calls.lock().unwrap();
+                        *c += 1;
+                        *c
+                    };
+                    if n <= 2 {
+                        (
+                            StatusCode::UNAUTHORIZED,
+                            Json(json!({"error": {"message": "invalid x-api-key"}})),
+                        )
+                            .into_response()
+                    } else {
+                        Json(json!({"id":"m","content":[],"usage":{"input_tokens":1,"output_tokens":1}}))
+                            .into_response()
+                    }
+                }
+            }),
+        )
+        .into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, upstream).await;
+    });
+
+    store
+        .insert_provider(&provider(
+            "p-ant",
+            Protocol::Anthropic,
+            format!("http://{addr}"),
+        ))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    // A second agent with its own breaker: it must not inherit the first's 401.
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    for _ in 0..2 {
+        let r = post_json(
+            &app,
+            "/v1/messages",
+            Some("kw-ag-claude-test"),
+            r#"{"model":"m"}"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    }
+    // Open now, and the next request replays the upstream's words.
+    let r = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = serde_json::from_slice(&response_body(r).await).unwrap();
+    assert_eq!(body["error"]["message"], "invalid x-api-key");
+
+    // Another agent's breaker was never opened by claude's key: its request
+    // reaches the (now healthy) upstream rather than inheriting the replay.
+    // (The other half — the cache dying when the key starts working — is pinned
+    // at the breaker, where the recovery can be driven without waiting out the
+    // 60-second open timeout: `the_rejection_body_is_dropped_on_recovery`.)
+    let r = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
 }
 
 /// KIW-PRIV-001: `/metrics` outside the key gate, but the identifiers in its

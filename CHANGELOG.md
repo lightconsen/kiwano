@@ -34,6 +34,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   each image at 1500 — and answers in Anthropic's shape. The error direction is
   deliberate: over-counting compacts a turn early; under-counting runs out of
   window mid-turn. Nothing is metered for it.
+- **A provider whose key is refused now says so, instead of "circuit open".**
+  The breaker opens after two 401s — correctly, it stops asking an upstream
+  whose key is dead — but it used to answer every request in the meantime with
+  a 503 of its own making. An agent reads 503 as "busy, retry", so it retried
+  for nine hours and left 149 identical rows in the log. The 401 the upstream
+  gave is now kept and replayed: the client sees the vendor's own "invalid key"
+  and stops. The breaker still withholds the request; only the answer changed.
 
 ## [0.4.1] - 2026-10-30
 

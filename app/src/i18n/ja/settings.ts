@@ -5,6 +5,7 @@ export const settings = {
   theme: "テーマ",
   themeLight: "ライト",
   themeDark: "ダーク",
+  themeSystem: "システム",
   launchAtLogin: "ログイン時に起動",
   minimizeToTray: "閉じるときはトレイに最小化",
   logs: "ログ",

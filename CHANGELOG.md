@@ -19,6 +19,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **The theme has a System option, and it keeps following the OS.** Dark and
+  light are still there; System resolves from the operating system's appearance
+  and re-resolves when that changes while the window is open — the native window
+  chrome included, which is told to follow rather than pinned to whatever the OS
+  happened to be at launch. The *choice* is what gets stored and cached for the
+  first paint, never the colour it resolved to: caching "dark" because the
+  laptop was dark at that moment would leave the app dark after the OS went
+  light.
+
 ## [0.4.2] - 2026-10-30
 
 **The version where the gateway stops inventing errors.** Three things it was

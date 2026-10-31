@@ -137,6 +137,27 @@ describe("the agent takeover row", () => {
 // and both have to render it as itself: a row reading "0 days" or "0 MB" while
 // nothing is being pruned or truncated is a row that says the opposite of what
 // the gateway is doing.
+describe("the theme row", () => {
+  it("offers System beside the two fixed colours, and stores the choice", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.updateSettings.mockResolvedValue({ ...settingsWith(true), theme: "system" });
+    const user = userEvent.setup();
+    render(<Settings />);
+
+    await user.click(await screen.findByRole("combobox", { name: en.settings.theme }));
+    // The third option, and the two that were already there.
+    expect(await screen.findByRole("option", { name: en.settings.themeSystem })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: en.settings.themeDark })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: en.settings.themeLight })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: en.settings.themeSystem }));
+    // The *choice* travels and is cached, not the colour it resolved to — a
+    // stored "dark" would pin a laptop that changed appearance overnight.
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalledWith({ theme: "system" }));
+    expect(localStorage.getItem("kiwano.theme")).toBe("system");
+  });
+});
+
 describe("the request-log limits", () => {
   it("says keep all rather than showing a zero-day retention", async () => {
     apiMock.getSettings.mockResolvedValue({ ...settingsWith(true), log_retention_days: 0 });

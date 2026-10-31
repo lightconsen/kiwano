@@ -11,7 +11,7 @@ import { api } from "./api/client";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { CredentialBanner } from "./components/CredentialBanner";
 import { GatewayDbBanner } from "./components/GatewayDbBanner";
-import { applyTheme } from "./lib/theme";
+import { applyTheme, watchSystemTheme } from "./lib/theme";
 import { ReloadRegistryProvider, useReloadRegistry } from "./lib/reload";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
 import { onGatewayEvent, onOpenGatewayEvent, onOpenSettings, onUsageChanged } from "./lib/updateEvents";
@@ -138,6 +138,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+
+  // The OS appearance can change under a running window, and with the theme on
+  // "system" nothing else would notice — `applyTheme` runs on a transition, and
+  // this is the absence of one. Registered once, before the settings read, so
+  // the very first flip is already covered.
+  useEffect(() => watchSystemTheme(), []);
 
   // Settings own the theme. The pre-paint script in index.html only had the
   // cached copy, so this is what decides it for real. Same round trip keeps the

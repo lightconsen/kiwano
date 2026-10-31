@@ -7,12 +7,17 @@
     <title>Kiwano</title>
     <!-- Theme before first paint: the setting lives in the backend, so without
          this cached copy the window would flash the default theme on launch.
+         The cache holds the *choice*, so "system" is resolved here too — a
+         stored "dark" would pin a laptop that changed appearance overnight.
          Dark stays the default, matching the class on <html> above. -->
     <script>
       try {
-        if (localStorage.getItem("kiwano.theme") === "light") {
-          document.documentElement.classList.remove("dark");
-        }
+        var choice = localStorage.getItem("kiwano.theme");
+        var dark =
+          choice === "system"
+            ? window.matchMedia("(prefers-color-scheme: dark)").matches
+            : choice !== "light";
+        document.documentElement.classList.toggle("dark", dark);
       } catch (e) {
         /* storage disabled: keep the default */
       }

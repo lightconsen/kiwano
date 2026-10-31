@@ -7,6 +7,7 @@ export const settings = {
   theme: "Theme",
   themeLight: "Light",
   themeDark: "Dark",
+  themeSystem: "System",
   launchAtLogin: "Launch at login",
   minimizeToTray: "Minimize to tray on close",
   logs: "Logs",

@@ -14,7 +14,7 @@ import { api } from "../api/client";
 import { fmtMB } from "../lib/format";
 import { releaseNotesFor } from "../lib/releaseNotes";
 import { useReload } from "../lib/reload";
-import { applyTheme } from "../lib/theme";
+import { applyTheme, THEME_SYSTEM } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
 import { startUpdateInstall, useUpdateInstall } from "../lib/updateInstall";
 import {
@@ -25,6 +25,7 @@ import {
   useLocale,
   useT,
   type LanguagePref,
+  type Translate,
 } from "../i18n";
 import type { AppSettings, UpdateInfo } from "../api/types";
 
@@ -44,6 +45,18 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
     rather than a number field because the useful values are few and the unit
     matters more than the precision. */
 const TIMEOUT_CHOICES = [0, 30, 60, 120, 300];
+
+/** The theme choices, in the order the select lists them: the two fixed ones,
+    then "follow the OS" — the option most people want and the one whose label
+    only makes sense after the other two are known. */
+const THEME_PREFS = ["dark", "light", THEME_SYSTEM] as const;
+
+/** The label for the theme select. `system` needs the current language; the
+    other two are their own names. */
+function themeLabel(t: Translate, pref: string): string {
+  if (pref === THEME_SYSTEM) return t("settings.themeSystem");
+  return pref === "light" ? t("settings.themeLight") : t("settings.themeDark");
+}
 
 /// Retention choices, in days. 0 keeps every row, spelled the way the stream
 /// timeouts below spell "off", and it is what an install gets by default: a
@@ -356,15 +369,22 @@ export default function Settings() {
                 patch({ theme: v });
               }}
             >
-              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
+              <SelectTrigger
+                size="sm"
+                aria-label={t("settings.theme")}
+                className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2"
+              >
                 {/* Same reason as Language: the value is lowercase ("dark"). */}
                 <SelectValue>
-                  {(v) => (v === "light" ? t("settings.themeLight") : t("settings.themeDark"))}
+                  {(v) => themeLabel(t, (v as string) ?? "dark")}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="dark">{t("settings.themeDark")}</SelectItem>
-                <SelectItem value="light">{t("settings.themeLight")}</SelectItem>
+                {THEME_PREFS.map((pref) => (
+                  <SelectItem key={pref} value={pref}>
+                    {themeLabel(t, pref)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Row>

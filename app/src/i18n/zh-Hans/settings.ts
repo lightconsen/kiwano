@@ -5,6 +5,7 @@ export const settings = {
   theme: "主题",
   themeLight: "浅色",
   themeDark: "深色",
+  themeSystem: "跟随系统",
   launchAtLogin: "登录时启动",
   minimizeToTray: "关闭时最小化到托盘",
   logs: "日志",

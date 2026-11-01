@@ -16,6 +16,7 @@
 // window resizes. The wire layer is an SVG whose viewBox is 1000 units wide and
 // `H` tall (`preserveAspectRatio="none"`), so x is proportional and y is
 // exact — the DOM nodes below position their x in percent of the same units.
+import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Pin } from "lucide-react";
 
 import { useT, type KeyPath, type Messages } from "../../i18n";
@@ -120,6 +121,48 @@ function cachePct(u: Provider["usage"]): number | null {
   return Math.round((u.cache_read_tokens / denom) * 100);
 }
 
+/** How long a wire stays lit after the provider behind it recorded a request. */
+const FLASH_MS = 700;
+
+/** The numbers whose movement means "this provider just carried a request". */
+function usageMark(u: Provider["usage"] | undefined): string {
+  if (!u) return "";
+  return `${u.requests}|${u.input_tokens}|${u.output_tokens}|${u.cache_read_tokens}|${u.cache_creation_tokens}`;
+}
+
+/**
+ * Which candidates just took a request.
+ *
+ * Judged on the providers' own counters rather than on the gateway's
+ * `usage-changed` tick: that event says only "something happened somewhere",
+ * and a graph for one agent must not flash because another agent's traffic
+ * moved. The hook compares each provider's numbers against the last render and
+ * lights the ones that changed — the same idea as the usage cell's tint, at the
+ * other end of the wire.
+ *
+ * The first read never flashes: those numbers did not move, they arrived.
+ */
+function useUsageFlash(marks: Record<string, string>): Set<string> {
+  const [flashing, setFlashing] = useState<Set<string>>(() => new Set());
+  const previous = useRef<Record<string, string> | null>(null);
+  const key = JSON.stringify(marks);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = marks;
+    if (!before) return;
+    const moved = Object.keys(marks).filter(
+      (id) => before[id] !== undefined && before[id] !== marks[id],
+    );
+    if (moved.length === 0) return;
+    setFlashing(new Set(moved));
+    const timer = window.setTimeout(() => setFlashing(new Set()), FLASH_MS);
+    return () => window.clearTimeout(timer);
+    // Re-run on the numbers, not on identity: `marks` is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return flashing;
+}
+
 export function RouteGraph({
   agent,
   route,
@@ -161,6 +204,10 @@ export function RouteGraph({
     void api.reorderAgentBindings(route.agent, ids).then(onChanged);
   };
 
+  const flashed = useUsageFlash(
+    Object.fromEntries(candidates.map(({ b }) => [b.provider_id, usageMark(byId.get(b.provider_id)?.usage)])),
+  );
+
   const caption = [t(STRATEGY_LABEL[route.strategy]), quotaText(route.config)]
     .filter(Boolean)
     .join(" · ");
@@ -198,17 +245,35 @@ export function RouteGraph({
             const y = firstY + i * ROW_H;
             const serving = p.serving_agents.includes(agent);
             const refused = blocked[p.id];
+            const path = `M ${HUB_X + 22} ${hubY} C ${HUB_X + 120} ${hubY}, ${PROV_X - 120} ${y}, ${PROV_X} ${y}`;
+            // A wider, faint copy underneath: the glow that says "this is the
+            // one carrying traffic", and the thing that brightens for a moment
+            // when a request actually lands on it. A second path rather than an
+            // SVG filter, because this canvas is stretched horizontally and a
+            // blur would stretch with it.
+            const lit = flashed.has(p.id);
             return (
-              <path
-                key={b.provider_id}
-                d={`M ${HUB_X + 22} ${hubY} C ${HUB_X + 120} ${hubY}, ${PROV_X - 120} ${y}, ${PROV_X} ${y}`}
-                fill="none"
-                stroke={refused ? "var(--red)" : serving ? "var(--kiwi)" : "var(--line)"}
-                strokeWidth={serving ? 2 : 1.5}
-                strokeDasharray={refused ? "4 3" : undefined}
-                opacity={serving || refused ? 1 : 0.55}
-                vectorEffect="non-scaling-stroke"
-              />
+              <g key={b.provider_id}>
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={refused ? "transparent" : "var(--kiwi)"}
+                  strokeWidth={lit ? 7 : 5}
+                  strokeLinecap="round"
+                  strokeOpacity={refused ? 0 : lit ? 0.6 : serving ? 0.18 : 0}
+                  style={{ transition: `stroke-opacity ${FLASH_MS}ms ease-out` }}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={refused ? "var(--red)" : serving ? "var(--kiwi)" : "var(--line)"}
+                  strokeWidth={serving ? 2 : 1.5}
+                  strokeDasharray={refused ? "4 3" : undefined}
+                  opacity={serving || refused ? 1 : 0.55}
+                  vectorEffect="non-scaling-stroke"
+                />
+              </g>
             );
           })}
         </svg>

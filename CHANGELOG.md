@@ -19,15 +19,37 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-01
+
+**The version where an agent's route has a picture.** An agent tab could only be
+read as a table — one row per candidate, every fact in its own column. That is
+the right shape for editing and the wrong one for seeing, because what the tab
+is about is a *route*: this agent, through the gateway, to these providers, in
+this order. The switch beside the agent's settings draws exactly that, and the
+table is still one click away.
+
+The picture is not a simplification of the table. Each candidate carries the
+same four facts the columns carry — its place in the queue, its usage against
+its quota, its prompt-cache share, and its status verdict — on a second line
+under its name. The wire to the provider actually serving this agent is drawn in
+the brand colour with a soft halo, and it brightens for a moment when that
+provider's own counters move: a request just went through.
+
+It is also not read-only. The three priority moves (pin, up, down) and the
+latency test appear on hover, in the same order and under the same rules as the
+table's own controls.
+
 ### Added
 
 - **An agent's route can be read as a picture.** The Apps page's agent tabs
-  gained a switch beside the agent's settings — table or graph — and the graph
-  draws what the strategy is doing: the agent, the gateway, and the candidate
-  providers in priority order, each carrying the fact its own strategy cares
-  about (rank, weight, or the time window it owns) plus which one is serving
-  now and which the gateway is refusing. It is a read view: reordering,
-  removing and the strategy itself stay in the table and the panel below it.
+  gained a switch beside the agent's settings — table or graph. The graph puts
+  the agent on the left, the gateway in the middle with the strategy's name
+  under it, and the candidates stacked in priority order; each carries the fact
+  its own strategy is about (rank, weight, or the time window it owns) plus the
+  four figures the table's columns carry. Reordering and the latency test live
+  on each candidate's hover. A candidate whose provider row is gone is skipped,
+  and the rank numbers keep their stored order, so a gap in the numbering means
+  a binding this screen cannot draw.
 - **The theme has a System option, and it keeps following the OS.** Dark and
   light are still there; System resolves from the operating system's appearance
   and re-resolves when that changes while the window is open — the native window

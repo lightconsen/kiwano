@@ -34,8 +34,8 @@ import type { AgentRef, AgentRoute, PlanQuotaReport, Provider, StrategyKind } fr
 // value here is also its percent (160 units = 16%).
 const AGENT_EDGE = 160;
 const HUB_X = 500;
-const PROV_X = 720;
-const PROV_LEFT = "72%";
+const PROV_X = 700;
+const PROV_LEFT = "70%";
 const ROW_H = 62;
 
 /** The strategy's name, from the panel's own vocabulary. */
@@ -167,7 +167,7 @@ export function RouteGraph({
 
   return (
     <div
-      className="relative mx-4 my-3 overflow-x-auto"
+      className="relative mx-10 my-4 overflow-x-auto"
       style={{ height }}
       role="img"
       aria-label={t("providers.graphAria", {

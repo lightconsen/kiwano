@@ -236,6 +236,9 @@ export function RouteGraph({
           style={{ left: `${HUB_X / 10}%`, top: hubY, transform: "translate(-50%, -50%)" }}
         >
           <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg" />
+          {/* Named, not just pictured: the mark alone is ambiguous on a screen
+              where every candidate is also a logo. */}
+          <span className="whitespace-nowrap text-[11px] font-semibold leading-none">Kiwano</span>
           <span className="whitespace-nowrap text-[10px] text-mut">{caption}</span>
         </div>
 

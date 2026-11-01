@@ -59,9 +59,14 @@ function deleteConsequence(p: Provider, routes: AgentRoute[] | null, t: Translat
 export function TestLatencyButton({
   provider,
   onTested,
+  compact = false,
 }: {
   provider: Provider;
   onTested: () => void;
+  /** Icon only, for a row with no space for a labelled button (the route
+      graph's hover controls). The reading still travels — it is in the title,
+      and a failure still turns the icon red. */
+  compact?: boolean;
 }) {
   const t = useT();
   const [state, setState] = useState<
@@ -106,19 +111,23 @@ export function TestLatencyButton({
     <Button
       variant="ghost"
       size="sm"
-      className="h-7 gap-1 whitespace-nowrap border border-line px-1.5 text-[10.5px]"
+      className={
+        compact
+          ? "h-6 w-6 gap-0 px-0 text-mut hover:text-ink"
+          : "h-7 gap-1 whitespace-nowrap border border-line px-1.5 text-[10.5px]"
+      }
       style={state.kind === "failed" ? { color: "var(--red)" } : undefined}
       aria-label={t("providers.testLatency")}
-      title={title}
+      title={compact ? `${title}${state.kind === "idle" ? "" : ` — ${label}`}` : title}
       disabled={state.kind === "busy"}
       onClick={test}
     >
       {state.kind === "busy" ? (
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        <RefreshCw className={compact ? "h-3 w-3 animate-spin" : "h-3.5 w-3.5 animate-spin"} />
       ) : (
-        <Gauge className="h-3.5 w-3.5" />
+        <Gauge className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
       )}
-      {state.kind === "idle" ? null : <span>{label}</span>}
+      {!compact && state.kind !== "idle" && <span>{label}</span>}
     </Button>
   );
 }

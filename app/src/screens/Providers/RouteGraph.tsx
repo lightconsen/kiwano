@@ -26,7 +26,7 @@ import { iconForEndpoint } from "@/components/icons/infer";
 import { agentMeta } from "../../lib/agents";
 import { fmtMoney, fmtTokens } from "../../lib/format";
 import { SEGMENT_ICON } from "./agents";
-import { HealthSummary } from "./rows";
+import { HealthSummary, TestLatencyButton } from "./rows";
 import { planUtilization, ringColor } from "./usage";
 import type { AgentRef, AgentRoute, PlanQuotaReport, Provider, StrategyKind } from "../../api/types";
 
@@ -275,7 +275,7 @@ export function RouteGraph({
                 {/* Priority: the same three moves the table's column offers,
                     revealed on hover the way its buttons are — invisible, not
                     absent, so the name does not shift when they appear. */}
-                <span className="flex w-[58px] shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+                <span className="flex w-[80px] shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
                   {route.strategy !== "roundrobin" && (
                     <button
                       type="button"
@@ -287,6 +287,7 @@ export function RouteGraph({
                       <Pin className="h-3 w-3" />
                     </button>
                   )}
+                  <TestLatencyButton provider={p} onTested={onChanged} compact />
                   {route.bindings.length > 1 && (
                     <>
                       <button

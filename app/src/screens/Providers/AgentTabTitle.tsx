@@ -21,6 +21,7 @@ export function AgentTabTitle({
   setAgentSettingsOpen,
   view,
   onToggleView,
+  showViewToggle,
 }: {
   seg: AgentRef | "all";
   /** The agent this tab belongs to, when the user defined it. */
@@ -35,9 +36,13 @@ export function AgentTabTitle({
       the current one is already on screen. */
   view: AgentView;
   onToggleView: () => void;
+  /** Whether this agent has a route to draw at all. The switch is pointless
+      without one — there is nothing on the other side of it — so the tab that
+      still shows its "enable" (or "no candidates") panel does not offer it. */
+  showViewToggle: boolean;
 }) {
   const t = useT();
-  const viewButton = (
+  const viewButton = showViewToggle ? (
     <Button
       variant="ghost"
       size="sm"
@@ -48,7 +53,7 @@ export function AgentTabTitle({
     >
       {view === "table" ? <Workflow className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
     </Button>
-  );
+  ) : null;
   return (
     <>
       {custom && (

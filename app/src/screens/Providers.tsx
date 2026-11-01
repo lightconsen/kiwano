@@ -495,6 +495,7 @@ export default function Providers({
             setAgentSettingsOpen={setAgentSettingsOpen}
             view={agentView}
             onToggleView={() => setAgentView((v) => (v === "table" ? "graph" : "table"))}
+            showViewToggle={drawable}
           />
         )}
         {loadErr && (

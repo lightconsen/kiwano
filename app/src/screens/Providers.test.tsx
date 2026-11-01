@@ -287,24 +287,36 @@ describe("the agent tab's two views", () => {
     expect(await screen.findByText(en.providers.colPriority)).toBeInTheDocument();
   });
 
-  it("keeps the table when there is no route to draw", async () => {
+  it("offers no switch until the agent has a route to draw", async () => {
     // An agent with no candidates: the picture would be an empty frame, and
-    // the table's own "bind one" panel is the answer the reader needs.
+    // the table's own "bind one" panel is the answer the reader needs. The
+    // switch is not offered either — there is nothing on the other side of it,
+    // so it would only be a button that does nothing.
     renderCodexTab({
       providers: [deepseek({ agents: [], serving_agents: [] })],
       routes: [codexRoute([])],
       codexTakenOver: true,
     });
 
-    const user = userEvent.setup();
-    // The empty route's own panel, before the switch is touched.
     expect(await screen.findByText(en.providers.takenOverBody)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.providers.viewGraph })).toBeNull();
+    expect(screen.queryByRole("button", { name: en.providers.viewTable })).toBeNull();
+  });
 
-    await user.click(screen.getByRole("button", { name: en.providers.viewGraph }));
-    // Still that panel: nothing was swapped for a frame with no candidates in
-    // it, and the switch stays offered because the route can gain one.
-    expect(screen.getByText(en.providers.takenOverBody)).toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: graphAria(en.strategy.single, 0) })).toBeNull();
+  it("offers no switch on an agent that has not been taken over", async () => {
+    // The tab is the takeover onboarding here: no route exists at all, and the
+    // switch belongs to a route.
+    renderCodexTab({
+      providers: [deepseek({ agents: [], serving_agents: [], is_current: false })],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: false,
+    });
+
+    expect(
+      await screen.findByText(en.providers.startManaging.replace("{agent}", "Codex")),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.providers.viewGraph })).toBeNull();
+    expect(screen.queryByRole("button", { name: en.providers.viewTable })).toBeNull();
   });
 });
 

@@ -19,6 +19,26 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-01
+
+**The version where a provider can go through its own proxy.** Some vendors are
+only reachable through a tunnel, and the gateway had exactly one transport for
+every upstream — so reaching one of them meant proxying the whole process, which
+takes every other provider down with it whenever the tunnel is. A provider now
+carries its own proxy: the one that names it goes through it, everything else
+keeps the direct route, and a proxy that fails fails only its own provider.
+
+Set it in the provider dialog's Advanced section, or with
+`kiwano providers edit <id> --proxy http://127.0.0.1:1087` — and `--no-proxy`
+puts it back on the direct route. The health prober asks through the same
+transport, so a provider behind a tunnel is not reported "down" because the
+prober went direct.
+
+This is also the release where a failed request says why. The log line used to
+end at "error sending request", which is the same sentence for a blocked host, a
+refused connection, a TLS failure and a dead proxy — the one case where the
+reason matters was the one case it was missing.
+
 ### Added
 
 - **A provider can be given its own HTTP(S) proxy.** A vendor that is only

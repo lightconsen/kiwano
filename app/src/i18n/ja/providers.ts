@@ -81,6 +81,7 @@ export const providers = {
   viewGraph: "グラフ表示",
   viewTable: "表表示",
   graphAria: "{agent} のルート：{strategy}、候補 {n} 件",
+  graphCache: "キャッシュ {pct}%",
   colActions: "操作",
 
   // ── Agent-tab role cell ──

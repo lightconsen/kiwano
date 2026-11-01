@@ -522,7 +522,13 @@ export default function Providers({
           would be a worse version of it. So the switch decides between two
           renderings of the same route, never between "route" and "no route". */}
       {seg !== "all" && route && drawable && agentView === "graph" ? (
-        <RouteGraph agent={seg} route={route} byId={byId} blocked={blocked} />
+        <RouteGraph
+          agent={seg}
+          route={route}
+          byId={byId}
+          blocked={blocked}
+          planQuotas={planQuotas}
+        />
       ) : (
         <ProviderTable
           seg={seg}

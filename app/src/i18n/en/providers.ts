@@ -107,6 +107,7 @@ export const providers = {
   viewGraph: "Graph view",
   viewTable: "Table view",
   graphAria: "Route for {agent}: {strategy}, {n} candidates",
+  graphCache: "cache {pct}%",
   colActions: "Actions",
 
   // ── Agent-tab role cell ──

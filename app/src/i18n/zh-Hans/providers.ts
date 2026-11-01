@@ -79,6 +79,7 @@ export const providers = {
   viewGraph: "图形视图",
   viewTable: "表格视图",
   graphAria: "{agent} 的路由：{strategy}，{n} 个候选",
+  graphCache: "缓存 {pct}%",
   colActions: "操作",
 
   // ── Agent-tab role cell ──

@@ -7,7 +7,7 @@ import { BillTag, Ring, Sparkline } from "../../components/bits";
 import { fmtLatency, fmtMoney, fmtTokens } from "../../lib/format";
 import { PLAN_TIER_LABEL_KEYS, type PlanQuotaReport, type Provider } from "../../api/types";
 
-function ringColor(billing: Provider["billing"], pct: number): string {
+export function ringColor(billing: Provider["billing"], pct: number): string {
   if (billing === "plan") return "var(--violet)";
   if (pct >= 95) return "var(--red)";
   if (pct >= 80) return "var(--amber)";
@@ -89,6 +89,27 @@ function quotaAmountText(used: number, limit: number, unit: string): string {
   return `${fmtMoney(used, unit)} / ${fmtMoney(limit, unit)}`;
 }
 
+/** How close a plan provider is to the tightest of its configured windows, as
+    a percentage (0-100). `null` when nothing can be computed — no limits, or a
+    plan query that has not answered yet.
+ *
+ * One function rather than two readings of the same rule: the table's ring and
+ * the route graph's compact figure both show this number, and a threshold that
+ * drifts between them would be two different verdicts on one provider. */
+export function planUtilization(p: Provider, plan?: PlanQuotaReport): number | null {
+  const l = p.plan_limits;
+  if (!l) return null;
+  const util = (name: string) =>
+    plan?.success ? plan.tiers.find((tier) => tier.name === name)?.utilization : undefined;
+  const five = util("five_hour");
+  const week = util("weekly_limit");
+  const fiveRatio = l.five_hour != null && five != null ? (five / l.five_hour) * 100 : null;
+  const weekRatio = l.weekly != null && week != null ? (week / l.weekly) * 100 : null;
+  const ratios = [fiveRatio, weekRatio].filter((r): r is number => r != null);
+  if (ratios.length === 0) return null;
+  return Math.min(100, Math.round(Math.max(...ratios)));
+}
+
 /** Tooltip of the live plan-quota line: the failure reason when the query
     failed, otherwise the template id plus a cached marker. `template` is a
     backend identifier and stays untranslated. */
@@ -111,15 +132,7 @@ function planPercentCell(
   title: string,
 ): ReactNode {
   const l = p.plan_limits!;
-  const util = (name: string) =>
-    plan?.success ? plan.tiers.find((t) => t.name === name)?.utilization : undefined;
-  const five = util("five_hour");
-  const week = util("weekly_limit");
-  const ratios = [
-    l.five_hour != null && five != null ? (five / l.five_hour) * 100 : 0,
-    l.weekly != null && week != null ? (week / l.weekly) * 100 : 0,
-  ];
-  const pct = Math.min(100, Math.round(Math.max(...ratios, 0)));
+  const pct = planUtilization(p, plan) ?? 0;
   const color = pct >= 95 ? "var(--red)" : pct >= 80 ? "var(--amber)" : "var(--kiwi)";
   // Two optional whole phrases with a fixed order, joined by a neutral
   // separator — each is translated on its own so the join needs no key.

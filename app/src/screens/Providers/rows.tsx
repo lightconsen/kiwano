@@ -204,16 +204,30 @@ export function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
       </div>
     );
   }
+  return (
+    <div className="w-[12%]">
+      <HealthSummary p={p} />
+    </div>
+  );
+}
+
+/** The status verdict alone, with no column width around it — what the route
+    graph draws in place of the table's Status column.
+ *
+ * The two must say the same thing, so this is the only place the rule lives:
+ * the provider is parked, or the last measurement failed, or here is how long
+ * it took. `blocked` is the caller's own fact (the gateway refusing this
+ * provider), which the graph has and this does not. */
+export function HealthSummary({ p }: { p: Provider }) {
+  const t = useT();
   const h = p.health;
   // Parked: out of every route, which outranks any reading of the endpoint.
   if (h.note) {
     return (
-      <div className="w-[12%]">
-        <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
-          <Dot state={h.state} />
-          {h.note}
-        </span>
-      </div>
+      <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
+        <Dot state={h.state} />
+        {h.note}
+      </span>
     );
   }
   // Measured, and not working. Two ways to get here, and the reason is what
@@ -223,22 +237,20 @@ export function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   if (h.state === "error") {
     const said = h.error;
     return (
-      <div
-        className="w-[12%]"
+      <span
+        className="flex items-center gap-1.5 text-[11.5px] text-mut"
         title={
           said
             ? t("providers.refusedTitle", { error: said, time: fmtClock(h.checked_at) })
             : t("providers.unreachableTitle", { time: fmtClock(h.checked_at) })
         }
       >
-        <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
-          <Dot state="error" />
-          {said ? t("providers.refused") : t("providers.unreachable")}
-        </span>
-      </div>
+        <Dot state="error" />
+        {said ? t("providers.refused") : t("providers.unreachable")}
+      </span>
     );
   }
-  if (h.latency_ms == null) return <div className="w-[12%]" />;
+  if (h.latency_ms == null) return null;
   // Whose measurement it is, in the tooltip: your own traffic, the gateway's
   // unsigned GET, or the test you ran — each a different amount of proof, and
   // the last one the only one that exercises the key on demand.
@@ -249,12 +261,10 @@ export function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
         ? t("providers.latencyTest", { time: fmtClock(h.checked_at) })
         : t("providers.latencyProbe", { time: fmtClock(h.checked_at) });
   return (
-    <div className="w-[12%]" title={title}>
-      <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
-        <Dot state="ok" />
-        <span className="font-mono">{fmtLatency(h.latency_ms)}</span>
-      </span>
-    </div>
+    <span className="flex items-center gap-1.5 text-[11.5px] text-mut" title={title}>
+      <Dot state="ok" />
+      <span className="font-mono">{fmtLatency(h.latency_ms)}</span>
+    </span>
   );
 }
 

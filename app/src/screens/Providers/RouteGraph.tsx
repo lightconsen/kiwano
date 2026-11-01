@@ -21,14 +21,19 @@ import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import logoUrl from "@/assets/kiwano-logo.svg";
 import { iconForEndpoint } from "@/components/icons/infer";
 import { agentMeta } from "../../lib/agents";
+import { fmtMoney, fmtTokens } from "../../lib/format";
+import { Ring } from "../../components/bits";
 import { SEGMENT_ICON } from "./agents";
-import type { AgentRef, AgentRoute, Provider, StrategyKind } from "../../api/types";
+import { HealthSummary } from "./rows";
+import { planUtilization, ringColor } from "./usage";
+import type { AgentRef, AgentRoute, PlanQuotaReport, Provider, StrategyKind } from "../../api/types";
 
 // Layout constants, in wire-layer units. 1000 units is the full width, so a
 // value here is also its percent (160 units = 16%).
 const AGENT_EDGE = 160;
-const HUB_X = 500;
-const PROV_X = 780;
+const HUB_X = 330;
+const PROV_X = 450;
+const PROV_LEFT = "45%";
 const ROW_H = 56;
 
 /** The strategy's name, from the panel's own vocabulary. */
@@ -69,17 +74,65 @@ function badgeFor(route: AgentRoute, binding: AgentRoute["bindings"][number]): s
   }
 }
 
+/** The usage/quota column, in the one line this picture has for it.
+ *
+ * The ring carries the percentage (the table's own ring, same thresholds), and
+ * the text carries what the percentage is *of*: a group of quota, a plan's live
+ * tiers, or the window's tokens. `null` text means the provider has nothing to
+ * show yet, which is the table's empty cell too. */
+function usageParts(
+  p: Provider,
+  plan: PlanQuotaReport | undefined,
+): { pct: number | null; text: string | null; color?: string } {
+  const u = p.usage;
+  if (u?.quota) {
+    const pct = Math.round((u.quota.used / u.quota.limit) * 100);
+    const amount =
+      u.quota.unit === "requests" || u.quota.unit === "wan_tokens"
+        ? `${u.quota.used}/${u.quota.limit}`
+        : `${fmtMoney(u.quota.used, u.quota.unit)}/${fmtMoney(u.quota.limit, u.quota.unit)}`;
+    return { pct, text: amount, color: ringColor(p.billing, pct) };
+  }
+  if (p.billing === "plan" && p.plan_limits) {
+    const pct = planUtilization(p, plan);
+    // The live tiers, when the endpoint answered: "5h 43%". Absent until it
+    // does, and the ring alone is still the right answer then.
+    const text = plan?.success
+      ? plan.tiers.map((tier) => `${Math.round(tier.utilization)}%`).join("/")
+      : null;
+    return { pct, text, color: pct != null ? ringColor(p.billing, pct) : undefined };
+  }
+  if (u) {
+    return { pct: null, text: `${fmtTokens(u.input_tokens + u.output_tokens)} tok` };
+  }
+  return { pct: null, text: null };
+}
+
+/** Share of input-side tokens served from cache — `CacheCell`'s arithmetic,
+    without its column. `null` when the window holds no input-side tokens: a 0%
+    there would read as "the cache never hits" where the truth is "nothing yet". */
+function cachePct(u: Provider["usage"]): number | null {
+  if (!u) return null;
+  const denom = u.input_tokens + u.cache_read_tokens + u.cache_creation_tokens;
+  if (denom === 0) return null;
+  return Math.round((u.cache_read_tokens / denom) * 100);
+}
+
 export function RouteGraph({
   agent,
   route,
   byId,
   blocked,
+  planQuotas,
 }: {
   agent: AgentRef;
   route: AgentRoute;
   byId: Map<string, Provider>;
   /** Why the gateway refuses to route to a provider right now, by id. */
   blocked: Record<string, string>;
+  /** Live plan-quota reports, by provider id — what the usage ring reads for a
+      plan provider, the same read the table's usage column makes. */
+  planQuotas: Record<string, PlanQuotaReport>;
 }) {
   const t = useT();
   const meta = agentMeta(agent);
@@ -93,7 +146,7 @@ export function RouteGraph({
 
   return (
     <div
-      className="relative mx-4 my-3 overflow-x-auto rounded-lg border border-line bg-surface"
+      className="relative mx-4 my-3 overflow-x-auto"
       style={{ height }}
       role="img"
       aria-label={t("providers.graphAria", {
@@ -139,9 +192,11 @@ export function RouteGraph({
           })}
         </svg>
 
-        {/* Left: who is asking. */}
+        {/* Left: who is asking. No rounded rectangle behind it: the agent reads
+            as a label on the wire, the way the candidates do on the other side,
+            so nothing in this picture is a box. */}
         <div
-          className="absolute flex items-center gap-2 rounded-lg border border-line-strong bg-surface2 px-2.5 py-1.5"
+          className="absolute flex items-center gap-2"
           style={{ left: "2%", top: hubY, transform: "translateY(-50%)", maxWidth: "14%" }}
         >
           <ProviderLogo
@@ -157,48 +212,81 @@ export function RouteGraph({
         {/* Middle: the gateway, with what it is doing on this route. */}
         <div
           className="absolute flex flex-col items-center gap-1"
-          style={{ left: "50%", top: hubY, transform: "translate(-50%, -50%)" }}
+          style={{ left: `${HUB_X / 10}%`, top: hubY, transform: "translate(-50%, -50%)" }}
         >
           <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg" />
           <span className="whitespace-nowrap text-[10px] text-mut">{caption}</span>
         </div>
 
-        {/* Right: the candidates, in priority order. */}
+        {/* Right: the candidates, in priority order. Each row carries what the
+            table's four data columns carry, in the same left-to-right order:
+            rank (Priority), the usage ring and its amount, the cache share,
+            and the status verdict. */}
         {bindings.map((b, i) => {
           const p = byId.get(b.provider_id)!;
           const serving = p.serving_agents.includes(agent);
           const refused = blocked[p.id];
           const badge = badgeFor(route, b);
+          const usage = usageParts(p, planQuotas[p.id]);
+          const cache = cachePct(p.usage);
           return (
             <div
               key={b.provider_id}
-              className="absolute flex items-center gap-2 rounded-lg px-2 py-1"
-              style={{ left: "78%", right: "2%", top: firstY + i * ROW_H, transform: "translateY(-50%)" }}
+              className="absolute flex items-center gap-1.5"
+              style={{ left: PROV_LEFT, right: "2%", top: firstY + i * ROW_H, transform: "translateY(-50%)" }}
               title={refused ?? undefined}
             >
-              <span className="w-3 shrink-0 text-right font-mono text-[10px] text-mut">{i + 1}</span>
+              <span
+                className="w-3 shrink-0 text-right font-mono text-[10px] text-mut"
+                title={t("providers.colPriority")}
+              >
+                {i + 1}
+              </span>
               {iconForEndpoint(p.endpoint) ? (
-                <ProviderLogo icon={iconForEndpoint(p.endpoint)} name={p.name} size={20} />
+                <ProviderLogo icon={iconForEndpoint(p.endpoint)} name={p.name} size={18} />
               ) : (
-                <ProviderLogo char={p.logo_char} color={p.logo_color} name={p.name} size={20} />
+                <ProviderLogo char={p.logo_char} color={p.logo_color} name={p.name} size={18} />
               )}
-              <span className={`min-w-0 truncate text-[11.5px] ${refused ? "text-mut" : ""}`}>
+              <span className={`w-[150px] shrink-0 truncate text-[11.5px] ${refused ? "text-mut" : ""}`}>
                 {p.name}
               </span>
               {badge && <span className="shrink-0 font-mono text-[10px] text-mut">{badge}</span>}
-              {/* The live half: which candidate is actually carrying this
-                  agent's traffic, and which ones the gateway is refusing. */}
-              {refused ? (
-                <span className="shrink-0 text-[10px]" style={{ color: "var(--red)" }}>
-                  {t("providers.blocked")}
-                </span>
-              ) : serving ? (
-                <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full"
-                  style={{ background: "var(--kiwi)" }}
-                  title={t("providers.inUse")}
-                />
-              ) : null}
+              {/* No "serving" dot: the wire to this candidate is already drawn
+                  in the brand colour when it is carrying the agent's traffic,
+                  and the status column beside it says whether it is healthy. */}
+              {serving && !refused && <span className="sr-only">{t("providers.inUse")}</span>}
+              {/* Usage / quota */}
+              <span className="flex w-[100px] shrink-0 items-center justify-end gap-1">
+                {usage.pct != null && <Ring pct={usage.pct} color={usage.color} />}
+                {usage.text && (
+                  <span className="truncate font-mono text-[10.5px] text-mut">{usage.text}</span>
+                )}
+              </span>
+              {/* Cached */}
+              <span
+                className="w-[58px] shrink-0 text-right font-mono text-[10.5px] text-mut"
+                title={cache == null ? t("providers.cacheNoData") : t("providers.cacheHitTitle", {
+                  pct: String(cache),
+                  read: fmtTokens(p.usage?.cache_read_tokens ?? 0),
+                  denom: fmtTokens(
+                    (p.usage?.input_tokens ?? 0) +
+                      (p.usage?.cache_read_tokens ?? 0) +
+                      (p.usage?.cache_creation_tokens ?? 0),
+                  ),
+                })}
+              >
+                {cache == null ? "–" : t("providers.graphCache", { pct: cache })}
+              </span>
+              {/* Status */}
+              <span className="flex w-[72px] shrink-0 items-center justify-end">
+                {refused ? (
+                  <span className="text-[10.5px]" style={{ color: "var(--red)" }}>
+                    {t("providers.blocked")}
+                  </span>
+                ) : (
+                  <HealthSummary p={p} />
+                )}
+              </span>
             </div>
           );
         })}

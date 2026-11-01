@@ -16,7 +16,10 @@
 // window resizes. The wire layer is an SVG whose viewBox is 1000 units wide and
 // `H` tall (`preserveAspectRatio="none"`), so x is proportional and y is
 // exact — the DOM nodes below position their x in percent of the same units.
+import { ArrowDown, ArrowUp, Pin } from "lucide-react";
+
 import { useT, type KeyPath, type Messages } from "../../i18n";
+import { api } from "../../api/client";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import logoUrl from "@/assets/kiwano-logo.svg";
 import { iconForEndpoint } from "@/components/icons/infer";
@@ -31,8 +34,8 @@ import type { AgentRef, AgentRoute, PlanQuotaReport, Provider, StrategyKind } fr
 // value here is also its percent (160 units = 16%).
 const AGENT_EDGE = 160;
 const HUB_X = 500;
-const PROV_X = 760;
-const PROV_LEFT = "76%";
+const PROV_X = 720;
+const PROV_LEFT = "72%";
 const ROW_H = 62;
 
 /** The strategy's name, from the panel's own vocabulary. */
@@ -123,6 +126,7 @@ export function RouteGraph({
   byId,
   blocked,
   planQuotas,
+  onChanged,
 }: {
   agent: AgentRef;
   route: AgentRoute;
@@ -132,13 +136,31 @@ export function RouteGraph({
   /** Live plan-quota reports, by provider id — what the usage ring reads for a
       plan provider, the same read the table's usage column makes. */
   planQuotas: Record<string, PlanQuotaReport>;
+  /** Something about the route changed (a reorder) — the screen re-reads. */
+  onChanged: () => void;
 }) {
   const t = useT();
   const meta = agentMeta(agent);
-  const bindings = route.bindings.filter((b) => byId.has(b.provider_id));
+  // Each candidate keeps its *real* index in the stored route: a binding whose
+  // provider row is gone is skipped on screen but still exists, and a reorder
+  // computed from the visible ones would silently drop it.
+  const candidates = route.bindings
+    .map((b, index) => ({ b, index }))
+    .filter(({ b }) => byId.has(b.provider_id));
+  const bindings = candidates.map(({ b }) => b);
   const height = Math.max(176, bindings.length * ROW_H + 40);
   const firstY = (height - (bindings.length - 1) * ROW_H) / 2;
   const hubY = height / 2;
+  /** Move the candidate at `from` to `to`, then let the screen re-read. The
+      list is the *stored* one, including bindings this picture cannot draw. */
+  const moveTo = (from: number, to: number) => {
+    const ids = route.bindings.map((b) => b.provider_id);
+    if (to < 0 || to >= ids.length || to === from) return;
+    const [moved] = ids.splice(from, 1);
+    ids.splice(to, 0, moved);
+    void api.reorderAgentBindings(route.agent, ids).then(onChanged);
+  };
+
   const caption = [t(STRATEGY_LABEL[route.strategy]), quotaText(route.config)]
     .filter(Boolean)
     .join(" · ");
@@ -221,7 +243,7 @@ export function RouteGraph({
             table's four data columns carry, in the same left-to-right order:
             rank (Priority), the usage ring and its amount, the cache share,
             and the status verdict. */}
-        {bindings.map((b, i) => {
+        {candidates.map(({ b, index }, i) => {
           const p = byId.get(b.provider_id)!;
           const refused = blocked[p.id];
           const badge = badgeFor(route, b);
@@ -230,7 +252,7 @@ export function RouteGraph({
           return (
             <div
               key={b.provider_id}
-              className="absolute flex flex-col gap-0.5"
+              className="group absolute flex flex-col gap-0.5"
               style={{ left: PROV_LEFT, right: "1%", top: firstY + i * ROW_H, transform: "translateY(-50%)" }}
             >
               {/* Who it is, and where it sits in the queue. */}
@@ -239,7 +261,7 @@ export function RouteGraph({
                   className="w-3 shrink-0 text-right font-mono text-[10px] text-mut"
                   title={t("providers.colPriority")}
                 >
-                  {i + 1}
+                  {index + 1}
                 </span>
                 {iconForEndpoint(p.endpoint) ? (
                   <ProviderLogo icon={iconForEndpoint(p.endpoint)} name={p.name} size={16} />
@@ -250,10 +272,48 @@ export function RouteGraph({
                   {p.name}
                 </span>
                 {badge && <span className="shrink-0 font-mono text-[10px] text-mut">{badge}</span>}
+                {/* Priority: the same three moves the table's column offers,
+                    revealed on hover the way its buttons are — invisible, not
+                    absent, so the name does not shift when they appear. */}
+                <span className="flex w-[58px] shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+                  {route.strategy !== "roundrobin" && (
+                    <button
+                      type="button"
+                      className={`rounded p-0.5 text-mut hover:text-ink${index === 0 ? " invisible" : ""}`}
+                      aria-label={t("providers.makePrimary")}
+                      title={t("providers.makePrimaryTitle")}
+                      onClick={() => moveTo(index, 0)}
+                    >
+                      <Pin className="h-3 w-3" />
+                    </button>
+                  )}
+                  {route.bindings.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-mut hover:text-ink disabled:opacity-30"
+                        aria-label={t("providers.moveUp")}
+                        disabled={index === 0}
+                        onClick={() => moveTo(index, index - 1)}
+                      >
+                        <ArrowUp className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-mut hover:text-ink disabled:opacity-30"
+                        aria-label={t("providers.moveDown")}
+                        disabled={index === route.bindings.length - 1}
+                        onClick={() => moveTo(index, index + 1)}
+                      >
+                        <ArrowDown className="h-3 w-3" />
+                      </button>
+                    </>
+                  )}
+                </span>
               </div>
               {/* The table's other three columns, together on the line under
                   the name: usage, cache, status. */}
-              <div className="flex items-center gap-2 pl-[26px] font-mono text-[10.5px] text-mut">
+              <div className="flex items-center gap-1.5 pl-[26px] font-mono text-[10.5px] text-mut">
                 {usage.pct != null && (
                   <span style={{ color: usage.color }} title={t("providers.colUsage")}>
                     {usage.pct}%

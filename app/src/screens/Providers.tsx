@@ -528,6 +528,7 @@ export default function Providers({
           byId={byId}
           blocked={blocked}
           planQuotas={planQuotas}
+          onChanged={refetch}
         />
       ) : (
         <ProviderTable

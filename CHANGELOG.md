@@ -19,6 +19,18 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-01
+
+**The version where a provider has a page of its own.** The Apps list is an
+index: one row per provider, sized for comparing a fleet. Everything a reader
+wants *next* — which agents this provider serves and where it sits in each of
+their queues, what its keys and transport are, what it has carried lately — had
+nowhere to live. Double-clicking a row (or pressing Enter on it) opens it.
+
+A request opened from that page keeps the page in its breadcrumb: Apps ›
+DeepSeek › Log #4, not Dashboard › Log #4. A breadcrumb says how the reader got
+here, and the second of those is a trail nobody walked.
+
 ### Added
 
 - **A provider has a page of its own.** Double-clicking a row on the Apps page

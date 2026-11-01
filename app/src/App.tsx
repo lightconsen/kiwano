@@ -56,6 +56,8 @@ function routeFromHash(): {
   agent: AgentRef | null;
   logId: number | null;
   sessionId: string | null;
+  /** `#providers/one/<provider id>` — one provider's own page. */
+  providerId: string | null;
 } {
   const [head, tail, extra] = window.location.hash.slice(1).split("/");
   const route: Route = NAV.some((n) => n.id === head) ? (head as Route) : "providers";
@@ -68,11 +70,17 @@ function routeFromHash(): {
       : null;
   const sessionId =
     route === "dashboard" && tail === "session" && extra ? safeDecode(extra) : null;
+  // One provider's own page, a sibling of the Apps list rather than a panel
+  // inside it: the list is the index and the page is the subject, the same
+  // division the Dashboard and a session's page already use.
+  const providerId =
+    route === "providers" && tail === "one" && extra ? safeDecode(extra) : null;
   // A drill-in is not an agent id: without this, a session's page would also
   // arrive as `agent: "session"`, which the Dashboard ignores today and some
   // later screen would not.
-  const agent = logId || sessionId ? null : tail ? safeDecode(tail) : null;
-  return { route, agent, logId, sessionId };
+  const agent =
+    logId || sessionId || providerId ? null : tail ? safeDecode(tail) : null;
+  return { route, agent, logId, sessionId, providerId };
 }
 
 /** `decodeURIComponent` throws on a malformed escape — `#dashboard/session/%E0%A4%A`
@@ -94,6 +102,7 @@ export default function App() {
     agent: AgentRef | null;
     logId: number | null;
     sessionId: string | null;
+    providerId: string | null;
   }>(routeFromHash);
   // The app's own reload: what the current screen re-reads, and whether one is
   // in flight (the button spins and disables for exactly as long as that is
@@ -386,7 +395,7 @@ export default function App() {
   }, []);
 
   const nav = (id: Route) => {
-    setRoute({ route: id, agent: null, logId: null, sessionId: null });
+    setRoute({ route: id, agent: null, logId: null, sessionId: null, providerId: null });
     window.location.hash = id;
   };
 
@@ -455,6 +464,7 @@ export default function App() {
             initialAgent={route.agent}
             onAdd={() => setModal({ open: true, preset: null, edit: null })}
             onEdit={(p) => setModal({ open: true, preset: null, edit: p })}
+            openProviderId={route.providerId}
           />
         )}
         {route.route === "shelf" && (

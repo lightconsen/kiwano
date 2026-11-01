@@ -103,6 +103,32 @@ export const providers = {
   colStatus: "Status",
   colPriority: "Priority",
 
+  // ── One provider's own page (#providers/one/<id>) ──
+  detailBreadcrumb: "Provider",
+  detailGone: "This provider is no longer here.",
+  detailParked: "Parked",
+  detailRequests: "Requests",
+  detailTokens: "Tokens",
+  detailCache: "Cache",
+  detailCost: "Cost, this window",
+  detailAgents: "Agents using it",
+  detailNoAgents: "No agent is bound to this provider.",
+  detailNoTraffic: "No requests through this provider yet.",
+  detailRankTitle: "Its place in that agent's queue",
+  detailStandby: "standby",
+  detailInstalled: "installed",
+  detailKeys: "Keys",
+  detailPrimaryKey: "Provider key",
+  detailKeyHidden: "stored, never shown",
+  detailNoPool: "No extra keys in the pool.",
+  detailDisabled: "disabled",
+  detailTransport: "Transport",
+  detailNoProxy: "direct",
+  detailDefault: "default",
+  detailRecent: "Recent requests",
+  openDetailTitle: "Double-click for this provider's page",
+
+
   // ── The agent tab's two views ──
   viewGraph: "Graph view",
   viewTable: "Table view",

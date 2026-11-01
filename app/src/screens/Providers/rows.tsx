@@ -309,6 +309,7 @@ export function ProviderRow({
   routes,
   onEdit,
   onDelete,
+  onOpen,
   onChanged,
 }: {
   p: Provider;
@@ -318,6 +319,11 @@ export function ProviderRow({
   routes: AgentRoute[] | null;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
+  /** Double-click opens this provider's own page. A row is an index entry;
+      the page is the subject. Not the single click: the row already spends it
+      on nothing, and one click opening a page would make every mis-click a
+      navigation. */
+  onOpen: (p: Provider) => void;
   onChanged: () => void;
 }) {
   const t = useT();
@@ -337,7 +343,18 @@ export function ProviderRow({
   const state = rowState(p, p.is_current, blocked);
   return (
     <>
-    <div className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}>
+    <div
+      className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}
+      onDoubleClick={() => onOpen(p)}
+      // The row is a link to its own page, and the keyboard's way in is the
+      // same gesture a screen reader announces: Enter on a focused row.
+      role="link"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onOpen(p);
+      }}
+      title={t("providers.openDetailTitle")}
+    >
       <IdentityCell p={p} isFallback={p.fallback_agents && p.fallback_agents.length > 0} />
 
       <div className="flex w-[16%] items-center">

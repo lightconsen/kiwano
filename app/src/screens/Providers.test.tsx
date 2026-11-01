@@ -51,6 +51,8 @@ const { apiMock } = vi.hoisted(() => ({
     clearAgentDir: vi.fn(),
     testProviderLatency: vi.fn(),
     setProviderEnabled: vi.fn(),
+    listRequestLogs: vi.fn(),
+    listApiKeys: vi.fn(),
   },
 }));
 
@@ -247,6 +249,59 @@ describe("an agent tab's row actions", () => {
     const pin = screen.getByLabelText(en.providers.makePrimary);
     expect(pin.className).toContain("invisible");
     expect(pin.nextElementSibling?.getAttribute("aria-label")).toBe(en.providers.testLatency);
+  });
+});
+
+describe("a provider's own page", () => {
+  it("a double-click asks the router for the page", async () => {
+    // The row is an index entry; the page is its subject. `Providers` does not
+    // route — the App owns the hash — so what this asserts is the *request*,
+    // which is the whole of this screen's half of the deal.
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    window.location.hash = "";
+    const user = userEvent.setup();
+    render(<Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} />);
+
+    const row = await screen.findByTitle(en.providers.openDetailTitle);
+    expect(window.location.hash).toBe("");
+    await user.dblClick(row);
+    expect(window.location.hash).toBe(`#providers/one/${encodeURIComponent("deepseek")}`);
+  });
+
+  it("renders the provider the route names, and comes back to the list", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
+    apiMock.listApiKeys.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} openProviderId="deepseek" />,
+    );
+
+    expect(await screen.findByRole("navigation", { name: en.providers.detailBreadcrumb })).toBeInTheDocument();
+    // The list is replaced, not overlaid.
+    expect(screen.queryByText(en.providers.colBoundAgents)).toBeNull();
+    // Twice: the breadcrumb names it and so does the heading.
+    expect(screen.getAllByText("DeepSeek").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: en.app.nav.apps }));
+    expect(window.location.hash).toBe("#providers");
+  });
+
+  it("says so when the route names a provider that is gone", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
+    apiMock.listApiKeys.mockResolvedValue([]);
+    render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} openProviderId="deleted-provider" />,
+    );
+
+    expect(await screen.findByText(en.providers.detailGone)).toBeInTheDocument();
   });
 });
 

@@ -31,6 +31,7 @@ import { AgentTabTitle } from "./Providers/AgentTabTitle";
 import { HeaderActions } from "./Providers/HeaderActions";
 import { ProviderTable } from "./Providers/ProviderTable";
 import { RouteGraph } from "./Providers/RouteGraph";
+import ProviderDetail from "./ProviderDetail";
 import { SegmentStrip } from "./Providers/SegmentStrip";
 
 export default function Providers({
@@ -40,6 +41,7 @@ export default function Providers({
   agentVersions = {},
   onRedetect,
   initialAgent = null,
+  openProviderId = null,
 }: {
   onAdd: () => void;
   onEdit: (p: Provider) => void;
@@ -52,6 +54,9 @@ export default function Providers({
   onRedetect?: Redetect;
   /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
   initialAgent?: AgentRef | null;
+  /** `#providers/one/<id>` — render that provider's own page instead of the
+      list. The list's read is what feeds it, so it is loaded either way. */
+  openProviderId?: string | null;
 }) {
   const t = useT();
   const [providers, setProviders] = useState<Provider[] | null>(null);
@@ -466,6 +471,21 @@ export default function Providers({
   // and no config file anywhere.
   const custom = seg === "all" ? undefined : customAgents.find((a) => a.id === seg);
 
+  // The provider's own page replaces the list rather than floating over it,
+  // the same rule a session's page follows under the Dashboard. Its own reads
+  // are inside it, so the list's are only the provider rows it renders from.
+  if (openProviderId) {
+    return (
+      <ProviderDetail
+        providerId={openProviderId}
+        providers={providers}
+        routes={routes}
+        agentDetect={agentDetect}
+        onEdit={onEdit}
+      />
+    );
+  }
+
   return (
     <section className="flex min-h-full flex-col">
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
@@ -550,6 +570,9 @@ export default function Providers({
           routes={routes}
           onEdit={onEdit}
           onDelete={onDelete}
+          onOpen={(p) => {
+            window.location.hash = `#providers/one/${encodeURIComponent(p.id)}`;
+          }}
           providers={providers}
         />
       )}

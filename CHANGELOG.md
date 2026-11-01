@@ -19,6 +19,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A provider has a page of its own.** Double-clicking a row on the Apps page
+  (or pressing Enter on it) opens `#providers/one/<id>`: who it is, its four
+  figures at a glance, every agent that has it bound with its place in that
+  queue, its key pool and transport settings, and its most recent requests —
+  each linking through to the request log. The list stays the index; the page is
+  the subject. Read-only on purpose: edit, park and delete stay on the row,
+  where a double-clicking habit cannot land on them.
+
 ## [0.4.4] - 2026-11-01
 
 **The version where a provider can go through its own proxy.** Some vendors are

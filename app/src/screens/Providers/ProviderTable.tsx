@@ -35,6 +35,7 @@ export function ProviderTable({
   routes,
   onEdit,
   onDelete,
+  onOpen,
   providers,
 }: {
   seg: AgentRef | "all";
@@ -56,6 +57,8 @@ export function ProviderTable({
   routes: AgentRoute[] | null;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
+  /** Double-click (or Enter) on a provider row opens its own page. */
+  onOpen: (p: Provider) => void;
   providers: Provider[];
 }) {
   const t = useT();
@@ -129,6 +132,7 @@ export function ProviderTable({
                   routes={routes}
                   onEdit={onEdit}
                   onDelete={onDelete}
+                  onOpen={onOpen}
                   onChanged={refetch}
                 />
               ))}

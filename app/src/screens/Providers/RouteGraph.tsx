@@ -22,7 +22,6 @@ import logoUrl from "@/assets/kiwano-logo.svg";
 import { iconForEndpoint } from "@/components/icons/infer";
 import { agentMeta } from "../../lib/agents";
 import { fmtMoney, fmtTokens } from "../../lib/format";
-import { Ring } from "../../components/bits";
 import { SEGMENT_ICON } from "./agents";
 import { HealthSummary } from "./rows";
 import { planUtilization, ringColor } from "./usage";
@@ -31,10 +30,10 @@ import type { AgentRef, AgentRoute, PlanQuotaReport, Provider, StrategyKind } fr
 // Layout constants, in wire-layer units. 1000 units is the full width, so a
 // value here is also its percent (160 units = 16%).
 const AGENT_EDGE = 160;
-const HUB_X = 330;
-const PROV_X = 450;
-const PROV_LEFT = "45%";
-const ROW_H = 56;
+const HUB_X = 500;
+const PROV_X = 760;
+const PROV_LEFT = "76%";
+const ROW_H = 62;
 
 /** The strategy's name, from the panel's own vocabulary. */
 const STRATEGY_LABEL: Record<StrategyKind, KeyPath<Messages>> = {
@@ -224,7 +223,6 @@ export function RouteGraph({
             and the status verdict. */}
         {bindings.map((b, i) => {
           const p = byId.get(b.provider_id)!;
-          const serving = p.serving_agents.includes(agent);
           const refused = blocked[p.id];
           const badge = badgeFor(route, b);
           const usage = usageParts(p, planQuotas[p.id]);
@@ -232,61 +230,62 @@ export function RouteGraph({
           return (
             <div
               key={b.provider_id}
-              className="absolute flex items-center gap-1.5"
-              style={{ left: PROV_LEFT, right: "2%", top: firstY + i * ROW_H, transform: "translateY(-50%)" }}
-              title={refused ?? undefined}
+              className="absolute flex flex-col gap-0.5"
+              style={{ left: PROV_LEFT, right: "1%", top: firstY + i * ROW_H, transform: "translateY(-50%)" }}
             >
-              <span
-                className="w-3 shrink-0 text-right font-mono text-[10px] text-mut"
-                title={t("providers.colPriority")}
-              >
-                {i + 1}
-              </span>
-              {iconForEndpoint(p.endpoint) ? (
-                <ProviderLogo icon={iconForEndpoint(p.endpoint)} name={p.name} size={18} />
-              ) : (
-                <ProviderLogo char={p.logo_char} color={p.logo_color} name={p.name} size={18} />
-              )}
-              <span className={`w-[150px] shrink-0 truncate text-[11.5px] ${refused ? "text-mut" : ""}`}>
-                {p.name}
-              </span>
-              {badge && <span className="shrink-0 font-mono text-[10px] text-mut">{badge}</span>}
-              {/* No "serving" dot: the wire to this candidate is already drawn
-                  in the brand colour when it is carrying the agent's traffic,
-                  and the status column beside it says whether it is healthy. */}
-              {serving && !refused && <span className="sr-only">{t("providers.inUse")}</span>}
-              {/* Usage / quota */}
-              <span className="flex w-[100px] shrink-0 items-center justify-end gap-1">
-                {usage.pct != null && <Ring pct={usage.pct} color={usage.color} />}
-                {usage.text && (
-                  <span className="truncate font-mono text-[10.5px] text-mut">{usage.text}</span>
-                )}
-              </span>
-              {/* Cached */}
-              <span
-                className="w-[58px] shrink-0 text-right font-mono text-[10.5px] text-mut"
-                title={cache == null ? t("providers.cacheNoData") : t("providers.cacheHitTitle", {
-                  pct: String(cache),
-                  read: fmtTokens(p.usage?.cache_read_tokens ?? 0),
-                  denom: fmtTokens(
-                    (p.usage?.input_tokens ?? 0) +
-                      (p.usage?.cache_read_tokens ?? 0) +
-                      (p.usage?.cache_creation_tokens ?? 0),
-                  ),
-                })}
-              >
-                {cache == null ? "–" : t("providers.graphCache", { pct: cache })}
-              </span>
-              {/* Status */}
-              <span className="flex w-[72px] shrink-0 items-center justify-end">
-                {refused ? (
-                  <span className="text-[10.5px]" style={{ color: "var(--red)" }}>
-                    {t("providers.blocked")}
-                  </span>
+              {/* Who it is, and where it sits in the queue. */}
+              <div className="flex items-center gap-1.5" title={refused ?? undefined}>
+                <span
+                  className="w-3 shrink-0 text-right font-mono text-[10px] text-mut"
+                  title={t("providers.colPriority")}
+                >
+                  {i + 1}
+                </span>
+                {iconForEndpoint(p.endpoint) ? (
+                  <ProviderLogo icon={iconForEndpoint(p.endpoint)} name={p.name} size={16} />
                 ) : (
-                  <HealthSummary p={p} />
+                  <ProviderLogo char={p.logo_char} color={p.logo_color} name={p.name} size={16} />
                 )}
-              </span>
+                <span className={`min-w-0 flex-1 truncate text-[11.5px] ${refused ? "text-mut" : ""}`}>
+                  {p.name}
+                </span>
+                {badge && <span className="shrink-0 font-mono text-[10px] text-mut">{badge}</span>}
+              </div>
+              {/* The table's other three columns, together on the line under
+                  the name: usage, cache, status. */}
+              <div className="flex items-center gap-2 pl-[26px] font-mono text-[10.5px] text-mut">
+                {usage.pct != null && (
+                  <span style={{ color: usage.color }} title={t("providers.colUsage")}>
+                    {usage.pct}%
+                  </span>
+                )}
+                {usage.text && <span className="truncate">{usage.text}</span>}
+                <span
+                  className="shrink-0"
+                  title={
+                    cache == null
+                      ? t("providers.cacheNoData")
+                      : t("providers.cacheHitTitle", {
+                          pct: String(cache),
+                          read: fmtTokens(p.usage?.cache_read_tokens ?? 0),
+                          denom: fmtTokens(
+                            (p.usage?.input_tokens ?? 0) +
+                              (p.usage?.cache_read_tokens ?? 0) +
+                              (p.usage?.cache_creation_tokens ?? 0),
+                          ),
+                        })
+                  }
+                >
+                  {cache == null ? "–" : t("providers.graphCache", { pct: cache })}
+                </span>
+                <span className="flex shrink-0 items-center">
+                  {refused ? (
+                    <span style={{ color: "var(--red)" }}>{t("providers.blocked")}</span>
+                  ) : (
+                    <HealthSummary p={p} />
+                  )}
+                </span>
+              </div>
             </div>
           );
         })}

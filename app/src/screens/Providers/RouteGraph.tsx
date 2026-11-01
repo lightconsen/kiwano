@@ -217,17 +217,21 @@ export function RouteGraph({
             as a label on the wire, the way the candidates do on the other side,
             so nothing in this picture is a box. */}
         <div
-          className="absolute flex items-center gap-2"
-          style={{ left: "2%", top: hubY, transform: "translateY(-50%)", maxWidth: "14%" }}
+          className="absolute flex flex-col items-center gap-1"
+          // Anchored by its right edge, so the block grows leftward from the
+          // wire rather than into it — and hung from the logo's centre, the
+          // same half-icon offset the hub uses, so the wire meets the mark and
+          // the name sits under it.
+          style={{ right: "85%", top: hubY, transform: "translateY(-16px)" }}
         >
           <ProviderLogo
             icon={SEGMENT_ICON[agent]}
             char={meta.chip_char}
             color={meta.chip_color}
             name={meta.label}
-            size={18}
+            size={32}
           />
-          <span className="truncate font-mono text-[11px]">{meta.label}</span>
+          <span className="max-w-[130px] truncate text-[11px] font-medium">{meta.label}</span>
         </div>
 
         {/* Middle: the gateway, with what it is doing on this route. */}

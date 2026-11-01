@@ -233,7 +233,9 @@ export function RouteGraph({
         {/* Middle: the gateway, with what it is doing on this route. */}
         <div
           className="absolute flex flex-col items-center gap-1"
-          style={{ left: `${HUB_X / 10}%`, top: hubY, transform: "translate(-50%, -50%)" }}
+          // Half the icon's height (h-8 = 32px), not half the block: the wires
+          // meet the mark, and the two lines of text hang below it.
+          style={{ left: `${HUB_X / 10}%`, top: hubY, transform: "translate(-50%, -16px)" }}
         >
           <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg" />
           {/* Named, not just pictured: the mark alone is ambiguous on a screen

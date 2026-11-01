@@ -351,7 +351,9 @@ export default function ProviderDetail({
                 key={r.id}
                 className="flex w-full cursor-pointer items-center gap-2 border-b border-line px-3 py-1.5 text-left font-mono text-[10.5px] last:border-b-0 hover:bg-surface2"
                 onClick={() => {
-                  window.location.hash = `#dashboard/log/${r.id}`;
+                  // Back through the page that listed it: the request's
+                  // breadcrumb is how it was reached, not where logs live.
+                  window.location.hash = `#providers/one/${encodeURIComponent(providerId)}/log/${r.id}`;
                 }}
               >
                 <span className="shrink-0 text-mut">{r.ts.slice(11, 19)}</span>

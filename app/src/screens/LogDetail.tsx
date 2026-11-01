@@ -17,10 +17,27 @@ import { useT } from "../i18n";
 import type { RequestLogDetail } from "../api/types";
 import { copyText, fmtLogText, fmtTime, LogDetailBody } from "./RequestLogs";
 
-/** Where the breadcrumb's root leads: the Dashboard, with no tail. */
+/** The Dashboard, with no tail — the root the page grew up under. */
 const DASHBOARD_HASH = "#dashboard";
 
-export default function LogDetail({ logId }: { logId: number }) {
+/** A step in the breadcrumb's trail above the request: a label and where it
+    leads. Passed in by whatever opened the log, because the same page is
+    reached from the Dashboard's log table and from one provider's own page,
+    and a request's trail should be the one it was walked down. */
+export interface LogTrailStep {
+  label: string;
+  hash: string;
+}
+
+export default function LogDetail({
+  logId,
+  trail = [],
+}: {
+  logId: number;
+  /** Steps between the nav root and the request, outermost first. Empty for
+      the Dashboard's own log list — that trail is just "Dashboard". */
+  trail?: LogTrailStep[];
+}) {
   const t = useT();
   const [row, setRow] = useState<RequestLogDetail | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -68,7 +85,7 @@ export default function LogDetail({ logId }: { logId: number }) {
 
   const title = t("logs.logTitle", { id: logId });
   const back = () => {
-    window.location.hash = DASHBOARD_HASH;
+    window.location.hash = trail.length > 0 ? trail[trail.length - 1].hash : DASHBOARD_HASH;
   };
 
   return (
@@ -76,11 +93,28 @@ export default function LogDetail({ logId }: { logId: number }) {
       <div className="p-4">
         <nav aria-label={t("logs.logBreadcrumb")} className="mb-2">
           <ol className="flex items-center gap-1.5 text-[11px] text-mut">
-            <li>
-              <button className="cursor-pointer hover:text-fg" onClick={back}>
-                {t("app.nav.dashboard")}
-              </button>
-            </li>
+            {/* The root is the Dashboard when nothing above it was walked
+                through; a log opened from a provider's page says Apps ›
+                <provider> instead, which is the way it was reached. */}
+            {trail.length === 0 && (
+              <li>
+                <button className="cursor-pointer hover:text-fg" onClick={back}>
+                  {t("app.nav.dashboard")}
+                </button>
+              </li>
+            )}
+            {trail.map((step) => (
+              <li key={step.hash} className="flex min-w-0 items-center gap-1.5">
+                <button className="cursor-pointer truncate hover:text-fg" onClick={() => {
+                  window.location.hash = step.hash;
+                }}>
+                  {step.label}
+                </button>
+                <span aria-hidden="true">
+                  <ChevronRight className="h-3 w-3" />
+                </span>
+              </li>
+            ))}
             <li aria-hidden="true">
               <ChevronRight className="h-3 w-3" />
             </li>

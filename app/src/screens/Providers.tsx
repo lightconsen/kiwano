@@ -32,6 +32,7 @@ import { HeaderActions } from "./Providers/HeaderActions";
 import { ProviderTable } from "./Providers/ProviderTable";
 import { RouteGraph } from "./Providers/RouteGraph";
 import ProviderDetail from "./ProviderDetail";
+import LogDetail from "./LogDetail";
 import { SegmentStrip } from "./Providers/SegmentStrip";
 
 export default function Providers({
@@ -42,6 +43,7 @@ export default function Providers({
   onRedetect,
   initialAgent = null,
   openProviderId = null,
+  providerLogId,
 }: {
   onAdd: () => void;
   onEdit: (p: Provider) => void;
@@ -57,6 +59,9 @@ export default function Providers({
   /** `#providers/one/<id>` — render that provider's own page instead of the
       list. The list's read is what feeds it, so it is loaded either way. */
   openProviderId?: string | null;
+  /** A request of that provider's, opened from its page — shown in place of
+      the page, with the page kept in the breadcrumb. */
+  providerLogId?: number;
 }) {
   const t = useT();
   const [providers, setProviders] = useState<Provider[] | null>(null);
@@ -475,6 +480,20 @@ export default function Providers({
   // the same rule a session's page follows under the Dashboard. Its own reads
   // are inside it, so the list's are only the provider rows it renders from.
   if (openProviderId) {
+    // A request opened from this page replaces it, the same way a request
+    // replaces the Dashboard — and carries the page back in its breadcrumb.
+    if (providerLogId != null) {
+      const name = providers?.find((p) => p.id === openProviderId)?.name ?? openProviderId;
+      return (
+        <LogDetail
+          logId={providerLogId}
+          trail={[
+            { label: t("app.nav.apps"), hash: "#providers" },
+            { label: name, hash: `#providers/one/${encodeURIComponent(openProviderId)}` },
+          ]}
+        />
+      );
+    }
     return (
       <ProviderDetail
         providerId={openProviderId}

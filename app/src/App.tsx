@@ -58,8 +58,15 @@ function routeFromHash(): {
   sessionId: string | null;
   /** `#providers/one/<provider id>` — one provider's own page. */
   providerId: string | null;
+  /** `#providers/one/<id>/log/<log id>` — one of its requests, opened from
+      that page. Its own trail, because the Dashboard's is not the way it was
+      reached. */
+  providerLogId: number | null;
 } {
-  const [head, tail, extra] = window.location.hash.slice(1).split("/");
+  // The whole path, because one route is deeper than two segments:
+  // `#providers/one/<id>/log/<logId>`.
+  const parts = window.location.hash.slice(1).split("/").map(safeDecode);
+  const [head, tail, extra, fourth, fifth] = parts;
   const route: Route = NAV.some((n) => n.id === head) ? (head as Route) : "providers";
   // Two drill-ins under the Dashboard, matched on the same segment and so
   // mutually exclusive by construction: a request log's detail, and a session's
@@ -68,19 +75,24 @@ function routeFromHash(): {
     route === "dashboard" && tail === "log" && extra && /^\d+$/.test(extra)
       ? Number(extra)
       : null;
-  const sessionId =
-    route === "dashboard" && tail === "session" && extra ? safeDecode(extra) : null;
+  const sessionId = route === "dashboard" && tail === "session" && extra ? extra : null;
   // One provider's own page, a sibling of the Apps list rather than a panel
   // inside it: the list is the index and the page is the subject, the same
   // division the Dashboard and a session's page already use.
-  const providerId =
-    route === "providers" && tail === "one" && extra ? safeDecode(extra) : null;
+  const providerId = route === "providers" && tail === "one" && extra ? extra : null;
+  // A request opened *from* that page: `#providers/one/<id>/log/<logId>`. It
+  // keeps the provider in the trail, because a breadcrumb says how the reader
+  // got here and "Dashboard › Logs" is a trail nobody walked.
+  const providerLogId =
+    providerId && fourth === "log" && fifth && /^\d+$/.test(fifth)
+      ? Number(fifth)
+      : null;
   // A drill-in is not an agent id: without this, a session's page would also
   // arrive as `agent: "session"`, which the Dashboard ignores today and some
   // later screen would not.
   const agent =
-    logId || sessionId || providerId ? null : tail ? safeDecode(tail) : null;
-  return { route, agent, logId, sessionId, providerId };
+    logId || sessionId || providerId ? null : tail ? tail : null;
+  return { route, agent, logId, sessionId, providerId, providerLogId };
 }
 
 /** `decodeURIComponent` throws on a malformed escape — `#dashboard/session/%E0%A4%A`
@@ -103,6 +115,7 @@ export default function App() {
     logId: number | null;
     sessionId: string | null;
     providerId: string | null;
+    providerLogId: number | null;
   }>(routeFromHash);
   // The app's own reload: what the current screen re-reads, and whether one is
   // in flight (the button spins and disables for exactly as long as that is
@@ -395,7 +408,14 @@ export default function App() {
   }, []);
 
   const nav = (id: Route) => {
-    setRoute({ route: id, agent: null, logId: null, sessionId: null, providerId: null });
+    setRoute({
+      route: id,
+      agent: null,
+      logId: null,
+      sessionId: null,
+      providerId: null,
+      providerLogId: null,
+    });
     window.location.hash = id;
   };
 
@@ -465,6 +485,7 @@ export default function App() {
             onAdd={() => setModal({ open: true, preset: null, edit: null })}
             onEdit={(p) => setModal({ open: true, preset: null, edit: p })}
             openProviderId={route.providerId}
+            providerLogId={route.providerLogId ?? undefined}
           />
         )}
         {route.route === "shelf" && (

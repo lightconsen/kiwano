@@ -53,6 +53,7 @@ const { apiMock } = vi.hoisted(() => ({
     setProviderEnabled: vi.fn(),
     listRequestLogs: vi.fn(),
     listApiKeys: vi.fn(),
+    getRequestLog: vi.fn(),
   },
 }));
 
@@ -289,6 +290,67 @@ describe("a provider's own page", () => {
 
     await user.click(screen.getByRole("button", { name: en.app.nav.apps }));
     expect(window.location.hash).toBe("#providers");
+  });
+
+  it("opens a request under the provider, and its breadcrumb walks back through it", async () => {
+    // A request reached from a provider's page keeps that page in the trail:
+    // "Dashboard > Logs" would be a trail nobody walked.
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.listApiKeys.mockResolvedValue([]);
+    apiMock.getRequestLog.mockResolvedValue({
+      id: 42,
+      ts: "2026-09-14T10:00:00Z",
+      method: "POST",
+      path: "/v1/messages",
+      query: null,
+      agent: "codex",
+      attribution: "key",
+      provider_id: "deepseek",
+      model: "deepseek-chat",
+      status_code: 200,
+      error_kind: null,
+      error_message: null,
+      session_id: null,
+      is_streaming: false,
+      input_tokens: 10,
+      output_tokens: 2,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      reasoning_tokens: 0,
+      usage_missing: false,
+      latency_ms: 120,
+      first_token_ms: null,
+      request_headers: null,
+      response_headers: null,
+      request_size: 0,
+      response_size: 0,
+      truncated: false,
+      request_notes: null,
+      request_body: null,
+      response_body: null,
+    });
+    const user = userEvent.setup();
+    render(
+      <Providers
+        onAdd={() => {}}
+        onEdit={() => {}}
+        agentDetect={codexInstalled}
+        openProviderId="deepseek"
+        providerLogId={42}
+      />,
+    );
+
+    // The request replaces the provider's page, and the trail names the route
+    // that led here - Apps, then the provider - with no "Dashboard" in it.
+    await screen.findByRole("navigation", { name: en.logs.logBreadcrumb });
+    expect(screen.getByRole("button", { name: en.app.nav.apps })).toBeInTheDocument();
+    const providerStep = screen.getByRole("button", { name: "DeepSeek" });
+    expect(screen.queryByRole("button", { name: en.app.nav.dashboard })).toBeNull();
+
+    await user.click(providerStep);
+    expect(window.location.hash).toBe(`#providers/one/${encodeURIComponent("deepseek")}`);
   });
 
   it("says so when the route names a provider that is gone", async () => {

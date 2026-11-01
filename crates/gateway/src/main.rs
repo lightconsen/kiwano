@@ -196,7 +196,7 @@ async fn main() {
     // day (`strategy::prober` — the scope is the reason this loop is affordable).
     // It routes nothing; the Status column reads it.
     tokio::spawn(kiwanod::strategy::prober::run(
-        state.store.clone(),
+        state.clone(),
         kiwanod::strategy::prober::PROBE_INTERVAL,
     ));
 

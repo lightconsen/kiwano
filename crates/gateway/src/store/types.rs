@@ -268,6 +268,14 @@ pub struct Provider {
     /// after credential injection, so they can override the defaults.
     #[serde(default)]
     pub headers: Option<String>,
+    /// An HTTP(S) proxy for this provider's upstream requests (migration v37):
+    /// a full URL, e.g. `http://127.0.0.1:1087`. NULL means the gateway's
+    /// default transport, which is every provider added before the column
+    /// existed — and the right answer for a provider that is reachable
+    /// directly, because a proxy that goes down should not take a direct route
+    /// down with it.
+    #[serde(default)]
+    pub proxy: Option<String>,
     /// The prices the user declared for this provider, as JSON
     /// `{"currency":"CNY","models":[…]}` (migration v20). NULL = none declared,
     /// which is every provider the Hub prices and the only state one added from

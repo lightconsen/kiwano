@@ -68,6 +68,11 @@ pub struct ProviderAdvancedVm {
     pub timeout_secs: Option<i64>,
     pub retries: Option<i64>,
     pub headers: std::collections::BTreeMap<String, String>,
+    /// The HTTP(S) proxy this provider sends through (migration v37); None =
+    /// the gateway's default transport, which is what an edit form that leaves
+    /// the box blank writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +208,12 @@ pub struct AdvancedInput {
     pub retries: Option<i64>,
     /// Header name → value; serialized to a JSON object column.
     pub headers: Option<std::collections::BTreeMap<String, String>>,
+    /// HTTP(S) proxy URL for this provider's upstream requests, e.g.
+    /// `http://127.0.0.1:1087`. Empty means "no proxy" — it is normalized to
+    /// NULL rather than stored, because a blank box is the form's way of saying
+    /// the same thing as an untouched one.
+    #[serde(default)]
+    pub proxy: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewEndpointInput {
@@ -334,6 +345,10 @@ pub struct AdvancedPatch {
     /// is what `providers edit --no-headers` sends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<std::collections::BTreeMap<String, String>>,
+    /// Absent = keep the stored proxy; an empty string clears it — which is
+    /// what `providers edit --no-proxy` sends. A present URL replaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
 }
 
 /// The fields an edit may change, and only those it names.

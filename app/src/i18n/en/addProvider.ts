@@ -139,6 +139,10 @@ export const addProvider = {
   retriesLabel: "Retries",
   advancedBody:
     "Blank = gateway default · timeout caps time to response headers, never an in-flight stream · retries apply to this provider before failover",
+  proxyLabel: "Proxy",
+  proxyPlaceholder: "http://127.0.0.1:1087",
+  proxyHint:
+    "This provider only — the others keep going direct. Leave blank if it is reachable without one.",
   customHeaders: "Custom headers",
   customHeadersHint: "merged last · can override the API key header",
   /** Shown only when a header is actually named one of these. */

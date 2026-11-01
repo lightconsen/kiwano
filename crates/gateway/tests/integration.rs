@@ -214,6 +214,9 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         timeout_secs: None,
         retries: None,
         headers: None,
+        // Direct by default, which is what every provider in these tests wants
+        // except the one proxy test that sets it.
+        proxy: None,
         reset_period: None,
         enabled: true,
         created_at: now_rfc3339(),
@@ -284,6 +287,93 @@ async fn wait_for_log(state: &GatewayState, expected: i64) -> Vec<RequestLogEntr
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!("request log row not persisted in time");
+}
+
+/// A provider that names a proxy sends through it; one that does not keeps the
+/// gateway's direct route. The point of a per-provider setting is exactly this
+/// asymmetry — a vendor that is only reachable through a tunnel says nothing
+/// about the others, and a proxy that is down must not take them with it.
+#[tokio::test]
+async fn a_proxied_provider_sends_through_its_proxy_and_a_direct_one_does_not() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // A proxy that records every request it is asked to carry.
+    let proxied = Arc::new(AtomicUsize::new(0));
+    let counter = proxied.clone();
+    let proxy = Router::new().fallback(move || {
+        let c = counter.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Json(json!({"id": "from-proxy", "usage": {"input_tokens": 1, "output_tokens": 1}}))
+        }
+    });
+    let proxy_url = spawn(proxy).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // One provider behind the proxy, one direct. Both point at a host only the
+    // proxy can answer for, so the direct one *must* fail — which is what
+    // proves the two took different transports.
+    let mut behind = provider(
+        "p-proxy",
+        Protocol::Anthropic,
+        "http://upstream.invalid".into(),
+    );
+    behind.proxy = Some(proxy_url);
+    store.insert_provider(&behind).unwrap();
+    store
+        .insert_provider(&provider(
+            "p-direct",
+            Protocol::Anthropic,
+            "http://upstream.invalid".into(),
+        ))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-proxy", 0)).unwrap();
+    store.upsert_binding(&bind("codex", "p-direct", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let hit = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(
+        hit.status(),
+        StatusCode::OK,
+        "the proxied provider answered"
+    );
+    let body: Value = serde_json::from_slice(&response_body(hit).await).unwrap();
+    assert_eq!(body["id"], "from-proxy", "the answer came from the proxy");
+    assert_eq!(proxied.load(Ordering::SeqCst), 1, "the proxy carried it");
+
+    let direct = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert!(
+        direct.status().is_server_error(),
+        "a host only the proxy can resolve fails on the direct route, got {}",
+        direct.status()
+    );
+    assert_eq!(
+        proxied.load(Ordering::SeqCst),
+        1,
+        "the direct provider did not go through the proxy"
+    );
 }
 
 #[tokio::test]

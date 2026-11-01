@@ -145,10 +145,11 @@ pub(crate) fn advanced_input(
     clear_headers: bool,
 ) -> Result<Option<vm::AdvancedInput>, CliError> {
     Ok(
-        advanced_patch(forward, clear_headers)?.map(|patch| vm::AdvancedInput {
+        advanced_patch(forward, clear_headers, false)?.map(|patch| vm::AdvancedInput {
             timeout_secs: patch.timeout_secs,
             retries: patch.retries,
             headers: patch.headers,
+            proxy: patch.proxy,
         }),
     )
 }
@@ -163,11 +164,14 @@ pub(crate) fn advanced_input(
 pub(crate) fn advanced_patch(
     forward: &ForwardArgs,
     clear_headers: bool,
+    clear_proxy: bool,
 ) -> Result<Option<vm::AdvancedPatch>, CliError> {
     let touched = forward.timeout.is_some()
         || forward.retries.is_some()
         || !forward.headers.is_empty()
-        || clear_headers;
+        || clear_headers
+        || forward.proxy.is_some()
+        || clear_proxy;
     if !touched {
         return Ok(None);
     }
@@ -178,10 +182,19 @@ pub(crate) fn advanced_patch(
     } else {
         None
     };
+    // Present-but-empty is how a patch says "clear it": the daemon keeps the
+    // stored proxy when the field is absent, and normalizes an empty string to
+    // NULL when it is present.
+    let proxy = if clear_proxy {
+        Some(String::new())
+    } else {
+        forward.proxy.clone()
+    };
     Ok(Some(vm::AdvancedPatch {
         timeout_secs: forward.timeout,
         retries: forward.retries,
         headers,
+        proxy,
     }))
 }
 

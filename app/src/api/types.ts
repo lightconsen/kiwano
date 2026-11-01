@@ -418,11 +418,15 @@ export interface Provider {
   agents_note?: string;
   health: ProviderHealth;
   usage: UsageSummary | null;
-  /** Advanced forwarding settings (timeout / retries / custom headers); absent = all defaults */
+  /** Advanced forwarding settings (timeout / retries / custom headers / proxy); absent = all defaults */
   advanced?: {
     timeout_secs?: number | null;
     retries?: number | null;
     headers?: Record<string, string>;
+    /** HTTP(S) proxy this provider's upstream requests go through; absent =
+        the gateway's default transport, which is the right answer for a
+        provider that is reachable directly. */
+    proxy?: string | null;
   };
 }
 
@@ -473,6 +477,8 @@ export interface NewProviderInput {
     timeout_secs?: number | null;
     retries?: number | null;
     headers?: Record<string, string>;
+    /** Empty string clears it; absent keeps the stored proxy. */
+    proxy?: string | null;
   };
 }
 

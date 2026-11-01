@@ -104,6 +104,7 @@ pub(crate) mod test_support {
             enabled: true,
             created_at: now_rfc3339(),
             updated_at: now_rfc3339(),
+            proxy: None,
         }
     }
 

@@ -215,6 +215,7 @@ pub(crate) mod test_support {
             enabled: true,
             created_at: "2026-09-07T00:00:00Z".into(),
             updated_at: "2026-09-07T00:00:00Z".into(),
+            proxy: None,
         }
     }
 
@@ -321,6 +322,7 @@ pub(crate) mod test_support {
                 timeout_secs: a.timeout_secs,
                 retries: a.retries,
                 headers: a.headers,
+                proxy: a.proxy,
             }),
             // `null` means "clear" and must survive the trip as such: a plain
             // `Option<Value>` would collapse it into "not speaking about it".

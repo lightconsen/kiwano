@@ -522,6 +522,7 @@ mod tests {
             enabled: true,
             created_at: crate::vm::rfc3339(crate::vm::unix_now()),
             updated_at: crate::vm::rfc3339(crate::vm::unix_now()),
+            proxy: None,
         }
     }
 

@@ -19,6 +19,25 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A provider can be given its own HTTP(S) proxy.** A vendor that is only
+  reachable through a tunnel says nothing about the others, so the setting is
+  per provider rather than per gateway: the one that names a proxy goes through
+  it, everything else keeps the direct route, and a proxy that is down takes
+  down only its own provider. Set it in the provider dialog's Advanced section
+  or with `kiwano providers edit <id> --proxy URL` (`--no-proxy` clears it).
+  The health prober uses the same transport, so a provider behind a proxy is
+  not reported "down" because the prober went direct.
+
+### Fixed
+
+- **A failed upstream request now names its cause.** The log line said only
+  "error sending request", which is the same sentence for a blocked host, a
+  refused connection, a TLS failure and a dead proxy — so the one case where
+  the reason matters was the one case it was missing. The source chain is
+  appended now.
+
 ## [0.4.3] - 2026-11-01
 
 **The version where an agent's route has a picture.** An agent tab could only be

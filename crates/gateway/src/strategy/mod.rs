@@ -111,6 +111,7 @@ pub(crate) mod test_support {
             timeout_secs: None,
             retries: None,
             headers: None,
+            proxy: None,
         }
     }
 

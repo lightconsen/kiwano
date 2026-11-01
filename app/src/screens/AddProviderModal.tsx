@@ -170,6 +170,10 @@ export default function AddProviderModal({
   const [advTimeout, setAdvTimeout] = useState("");
   const [advRetries, setAdvRetries] = useState("");
   const [advHeaders, setAdvHeaders] = useState<{ name: string; value: string }[]>([]);
+  // HTTP(S) proxy for this provider's upstream requests. Blank = the gateway's
+  // default transport, which is what every provider that is reachable directly
+  // wants — a proxy that goes down should not take a direct route with it.
+  const [advProxy, setAdvProxy] = useState("");
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
   // Plan-mode percent limits: per-window utilization ceilings over the
@@ -242,6 +246,7 @@ export default function AddProviderModal({
     setAdvTimeout("");
     setAdvRetries("");
     setAdvHeaders([]);
+    setAdvProxy("");
   };
 
   // Fetch the live model-name list from the primary endpoint. Requires the
@@ -368,6 +373,7 @@ export default function AddProviderModal({
       setAdvOpen(!!edit.advanced);
       setAdvTimeout(edit.advanced?.timeout_secs != null ? String(edit.advanced.timeout_secs) : "");
       setAdvRetries(edit.advanced?.retries != null ? String(edit.advanced.retries) : "");
+      setAdvProxy(edit.advanced?.proxy ?? "");
       setAdvHeaders(
         Object.entries(edit.advanced?.headers ?? {}).map(([hName, hValue]) => ({ name: hName, value: hValue })),
       );
@@ -732,6 +738,10 @@ export default function AddProviderModal({
           timeout_secs: advTimeout ? Number(advTimeout) : null,
           retries: advRetries ? Number(advRetries) : null,
           headers: Object.keys(headerMap).length > 0 ? headerMap : undefined,
+          // A patch reads a present empty string as "clear it", so an edit that
+          // emptied the box removes the proxy. On add there is nothing to
+          // clear, and sending "" would only be normalized back to NULL.
+          proxy: advProxy.trim() || (edit ? "" : undefined),
         },
         // Edit: "" = clear the config, a template = authoritative snapshot.
         // Shelf: carry the entry's own query, the same shape with no fields —
@@ -962,6 +972,8 @@ export default function AddProviderModal({
               advRetries={advRetries}
               setAdvRetries={setAdvRetries}
               advHeaders={advHeaders}
+              advProxy={advProxy}
+              setAdvProxy={setAdvProxy}
               setAdvHeaders={setAdvHeaders}
             />
           </div>

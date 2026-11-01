@@ -127,6 +127,7 @@ mod tests {
             enabled: true,
             created_at: crate::store::now_rfc3339(),
             updated_at: crate::store::now_rfc3339(),
+            proxy: None,
         }
     }
 

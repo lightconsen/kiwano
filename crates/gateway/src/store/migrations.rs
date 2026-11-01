@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 36;
+pub const SCHEMA_VERSION: i32 = 37;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -972,6 +972,15 @@ const MIGRATION_V36: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN cache_creation_1h TEXT;
 "#;
 
+/// v37: a per-provider HTTP(S) proxy. NULL means "the gateway's default
+/// transport" — every provider written before the column existed, and the
+/// default for one added after. A provider that can only be reached through a
+/// proxy is refused requests when the proxy is down, and *only* that provider:
+/// the others keep going through the default client.
+const MIGRATION_V37: &str = r#"
+ALTER TABLE providers ADD COLUMN proxy TEXT;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1139,6 +1148,9 @@ impl Store {
         }
         if version < 36 {
             conn.execute_batch(MIGRATION_V36)?;
+        }
+        if version < 37 {
+            conn.execute_batch(MIGRATION_V37)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

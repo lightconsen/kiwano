@@ -158,6 +158,7 @@ pub fn apply_import(
             timeout_secs: None,
             retries: None,
             headers: None,
+            proxy: None,
             enabled: true,
             created_at: now.clone(),
             updated_at: now,

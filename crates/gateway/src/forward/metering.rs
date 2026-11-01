@@ -176,6 +176,7 @@ mod tests {
                 enabled: true,
                 created_at: crate::store::now_rfc3339(),
                 updated_at: crate::store::now_rfc3339(),
+                proxy: None,
             })
             .unwrap();
 
@@ -280,6 +281,7 @@ mod tests {
                 enabled: true,
                 created_at: crate::store::now_rfc3339(),
                 updated_at: crate::store::now_rfc3339(),
+                proxy: None,
             })
             .unwrap();
 
@@ -380,6 +382,7 @@ mod tests {
                 enabled: true,
                 created_at: crate::store::now_rfc3339(),
                 updated_at: crate::store::now_rfc3339(),
+                proxy: None,
             })
             .unwrap();
 
@@ -490,6 +493,7 @@ mod tests {
                     enabled: true,
                     created_at: crate::store::now_rfc3339(),
                     updated_at: crate::store::now_rfc3339(),
+                    proxy: None,
                 })
                 .unwrap();
         }
@@ -613,6 +617,7 @@ mod tests {
                 enabled: true,
                 created_at: crate::store::now_rfc3339(),
                 updated_at: crate::store::now_rfc3339(),
+                proxy: None,
             };
         // A hand-added provider that declared prices, one that declared none (the
         // control, and what proves the rows are keyed by the row id rather than
@@ -735,6 +740,7 @@ mod tests {
                 enabled: true,
                 created_at: crate::store::now_rfc3339(),
                 updated_at: crate::store::now_rfc3339(),
+                proxy: None,
             })
             .unwrap();
 
@@ -880,6 +886,7 @@ mod tests {
                     enabled: true,
                     created_at: crate::store::now_rfc3339(),
                     updated_at: crate::store::now_rfc3339(),
+                    proxy: None,
                 })
                 .unwrap();
         }
@@ -993,6 +1000,7 @@ mod tests {
                     enabled: true,
                     created_at: crate::store::now_rfc3339(),
                     updated_at: crate::store::now_rfc3339(),
+                    proxy: None,
                 })
                 .unwrap();
         }

@@ -122,6 +122,9 @@ export const addProvider = {
   retriesLabel: "重试次数",
   advancedBody:
     "留空使用网关默认值 · 超时仅限制等待响应头的时间，不会中断进行中的流 · 重试在故障转移前对该 Provider 生效",
+  proxyLabel: "代理",
+  proxyPlaceholder: "http://127.0.0.1:1087",
+  proxyHint: "只对这个供应商生效，其他供应商仍然直连。不需要代理就留空。",
   customHeaders: "自定义请求头",
   customHeadersHint: "最后合并 · 可覆盖 API Key 请求头",
   customHeadersAuthWarning:

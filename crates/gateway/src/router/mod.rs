@@ -118,6 +118,10 @@ pub struct UpstreamProvider {
     /// Custom request headers merged after credential injection (v8) —
     /// `insert`-replace, so these can override the injected credentials.
     pub headers: Option<BTreeMap<String, String>>,
+    /// An HTTP(S) proxy this provider sends through (migration v37); None =
+    /// the gateway's default transport. Carried on the route because the
+    /// transport is built per attempt, in `forward::upstream`.
+    pub proxy: Option<String>,
 }
 
 /// The catalogue entry's per-endpoint model sets, as the router carries them.
@@ -379,6 +383,7 @@ impl RouteTable {
                         timeout_secs: p.timeout_secs.filter(|&s| s > 0).map(|s| s as u64),
                         retries: p.retries.filter(|&r| r > 0).map(|r| r as u32),
                         headers: parse_advanced_headers(p.headers.as_deref()),
+                        proxy: p.proxy.clone(),
                     }),
                     Some(_) => tracing::warn!(
                         agent = %agent,
@@ -577,6 +582,7 @@ mod tests {
             enabled,
             created_at: now_rfc3339(),
             updated_at: now_rfc3339(),
+            proxy: None,
         }
     }
 

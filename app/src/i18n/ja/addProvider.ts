@@ -118,6 +118,9 @@ export const addProvider = {
   retriesLabel: "リトライ回数",
   advancedBody:
     "空欄 = ゲートウェイの既定値 · タイムアウトは応答ヘッダーまでの時間に上限を設けるもので、進行中のストリームは打ち切りません · リトライはフェイルオーバー前にこのプロバイダーへ適用されます",
+  proxyLabel: "プロキシ",
+  proxyPlaceholder: "http://127.0.0.1:1087",
+  proxyHint: "このプロバイダのみに適用されます。不要なら空のままにしてください。",
   customHeaders: "カスタムヘッダー",
   customHeadersHint: "最後にマージ · API キーのヘッダーを上書きできます",
   customHeadersAuthWarning:

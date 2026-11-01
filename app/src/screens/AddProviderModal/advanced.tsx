@@ -25,6 +25,8 @@ export function AdvancedSection({
   setAdvRetries,
   advHeaders,
   setAdvHeaders,
+  advProxy,
+  setAdvProxy,
 }: {
   advOpen: boolean;
   setAdvOpen: Dispatch<SetStateAction<boolean>>;
@@ -34,6 +36,9 @@ export function AdvancedSection({
   setAdvRetries: (v: string) => void;
   advHeaders: { name: string; value: string }[];
   setAdvHeaders: Dispatch<SetStateAction<{ name: string; value: string }[]>>;
+  /** HTTP(S) proxy for this provider only; blank = the gateway default. */
+  advProxy: string;
+  setAdvProxy: (v: string) => void;
 }) {
   const t = useT();
   // Case-insensitive, like HTTP itself.
@@ -94,6 +99,20 @@ export function AdvancedSection({
             </div>
           </div>
           <p className="text-[10.5px] text-mut">{t("addProvider.advancedBody")}</p>
+          {/* A proxy per provider, not one for the gateway: a vendor that is
+              only reachable through one says nothing about the others, and a
+              proxy that is down must not take the directly reachable ones with
+              it. */}
+          <div>
+            <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.proxyLabel")}</Label>
+            <Input
+              className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+              value={advProxy}
+              onChange={(e) => setAdvProxy(e.target.value)}
+              placeholder={t("addProvider.proxyPlaceholder")}
+            />
+            <p className="mt-1 text-[10.5px] text-mut">{t("addProvider.proxyHint")}</p>
+          </div>
           <div>
             <Label className="text-[10.5px] font-medium text-mut">
               {t("addProvider.customHeaders")}{" "}

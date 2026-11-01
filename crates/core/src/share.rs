@@ -106,6 +106,7 @@ mod tests {
             enabled: true,
             created_at: now_stamp(),
             updated_at: now_stamp(),
+            proxy: None,
         }
     }
 

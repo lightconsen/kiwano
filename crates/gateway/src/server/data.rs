@@ -539,6 +539,7 @@ mod tests {
             timeout_secs: None,
             retries: None,
             headers: None,
+            proxy: None,
         }
     }
 

@@ -52,16 +52,33 @@ pub fn plan_limits_json(input: Option<&PlanLimitsInput>) -> Option<String> {
     }
 }
 
-/// Map the advanced input to the three store columns: timeout clamps to
+/// Map the advanced input to the four store columns: timeout clamps to
 /// 1..=3600 (else unset = gateway defaults), retries to 0..=5 (0 = "no retry"
 /// stored as NULL), headers serialize to a sanitized JSON object (dropping
-/// empty names/values; empty object → NULL).
-pub fn advanced_columns(adv: &AdvancedInput) -> (Option<i64>, Option<i64>, Option<String>) {
+/// empty names/values; empty object → NULL), and the proxy is normalized to a
+/// trimmed string (empty → NULL, which reads as "the gateway's default
+/// transport").
+pub fn advanced_columns(
+    adv: &AdvancedInput,
+) -> (Option<i64>, Option<i64>, Option<String>, Option<String>) {
     (
         clamped_timeout(adv.timeout_secs),
         clamped_retries(adv.retries),
         adv.headers.as_ref().and_then(sanitized_headers),
+        normalize_proxy(adv.proxy.as_deref()),
     )
+}
+
+/// The proxy a provider sends through, normalized to a store column: trimmed,
+/// and empty is "no proxy", which the column spells as NULL. A value that is
+/// not a URL the transport can read is refused by reqwest when the client is
+/// built — and that refusal is the only diagnosis there is, so the column does
+/// not try to pre-validate it.
+fn normalize_proxy(proxy: Option<&str>) -> Option<String> {
+    proxy
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
 }
 
 /// The three column rules, one each — because an edit patch applies them **per
@@ -325,6 +342,11 @@ pub fn update_provider(store: &Store, id: &str, patch: &ProviderPatch) -> Result
         if let Some(headers) = &adv.headers {
             p.headers = sanitized_headers(headers);
         }
+        // Absent = keep; a present empty string clears, which is how the form
+        // says "no proxy" — the same reading the other clearing fields use.
+        if let Some(proxy) = &adv.proxy {
+            p.proxy = normalize_proxy(Some(proxy));
+        }
     }
     // Plan quota query: absent keeps; null clears; an object replaces.
     if let Some(pq) = &patch.plan_query {
@@ -474,11 +496,11 @@ pub fn add_provider(
         }
         _ => None,
     };
-    let (timeout_secs, retries, adv_headers) = input
+    let (timeout_secs, retries, adv_headers, adv_proxy) = input
         .advanced
         .as_ref()
         .map(advanced_columns)
-        .unwrap_or((None, None, None));
+        .unwrap_or((None, None, None, None));
     let plan_query_json = input
         .plan_query
         .as_ref()
@@ -544,6 +566,7 @@ pub fn add_provider(
         timeout_secs,
         retries,
         headers: adv_headers,
+        proxy: adv_proxy,
         enabled: true,
         created_at: now.clone(),
         updated_at: now,
@@ -690,6 +713,7 @@ mod tests {
                     .into_iter()
                     .collect(),
             ),
+            proxy: None,
         });
         create.billing_config = BillingConfigInput {
             limit_value: Some(50.0),
@@ -914,6 +938,7 @@ mod tests {
                 enabled: true,
                 created_at: crate::store::now_rfc3339(),
                 updated_at: crate::store::now_rfc3339(),
+                proxy: None,
             })
             .unwrap();
         bind_as_primary(&store, "claude", "p-old").unwrap();

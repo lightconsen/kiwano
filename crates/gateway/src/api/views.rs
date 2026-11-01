@@ -67,7 +67,7 @@ pub fn provider_currency(p: &Provider, entries: &[CatalogEntryVm]) -> String {
 }
 
 pub fn advanced_vm(p: &Provider) -> Option<ProviderAdvancedVm> {
-    if p.timeout_secs.is_none() && p.retries.is_none() && p.headers.is_none() {
+    if p.timeout_secs.is_none() && p.retries.is_none() && p.headers.is_none() && p.proxy.is_none() {
         return None;
     }
     let headers = p
@@ -81,6 +81,7 @@ pub fn advanced_vm(p: &Provider) -> Option<ProviderAdvancedVm> {
         timeout_secs: p.timeout_secs,
         retries: p.retries,
         headers,
+        proxy: p.proxy.clone(),
     })
 }
 

@@ -38,16 +38,14 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const TRAFFIC_WINDOW_SECS: u64 = 86_400;
 
 /// Long-running probe loop (spawned by main at startup).
-pub async fn run(store: Arc<Store>, interval: Duration) {
-    let client = match reqwest::Client::builder().timeout(PROBE_TIMEOUT).build() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "health prober client init failed");
-            return;
-        }
-    };
+///
+/// Takes the state rather than the store alone: a provider that can only be
+/// reached through its own proxy must be probed the same way it is forwarded to,
+/// or a blocked provider would read "down" while it is in fact answering — and
+/// the Status column would be lying about the one thing it is for.
+pub async fn run(state: Arc<crate::server::GatewayState>, interval: Duration) {
     loop {
-        probe_once(&store, &client).await;
+        probe_once(&state).await;
         tokio::time::sleep(interval).await;
     }
 }
@@ -78,15 +76,26 @@ fn window_start() -> String {
 
 /// One probing round: ask each provider that needs it and persist the verdict.
 /// Failures do not abort the loop, and one provider's failure is not another's.
-pub async fn probe_once(store: &Store, client: &reqwest::Client) {
+pub async fn probe_once(state: &crate::server::GatewayState) {
+    let store = &*state.store;
     for p in needs_probing(store, &window_start()) {
+        // The transport this provider answers over, from the one place that
+        // decides it — a probe through the default client against a proxied
+        // provider measures a route nobody uses.
+        let client = match state.http_for(p.proxy.as_deref()) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(provider = %p.id, error = %e, "health probe: no transport");
+                continue;
+            }
+        };
         // The URL the gateway would forward to, from the function that builds
         // it — not a second composition beside it. A probe that measured a URL
         // the gateway never sends to would report a latency for a request
         // nobody makes, and would report a *failure* for the same reason.
         let url = crate::server::data::compose_upstream(&p.base_url, p.api_path.as_deref(), "");
         let started = Instant::now();
-        let (status, latency_ms) = match client.get(&url).send().await {
+        let (status, latency_ms) = match client.get(&url).timeout(PROBE_TIMEOUT).send().await {
             Ok(_) => ("reachable", started.elapsed().as_millis() as i64),
             Err(_) => ("down", 0),
         };
@@ -127,6 +136,7 @@ mod tests {
             timeout_secs: None,
             retries: None,
             headers: None,
+            proxy: None,
             reset_period: None,
             enabled: true,
             created_at: now_rfc3339(),
@@ -134,12 +144,12 @@ mod tests {
         }
     }
 
-    fn client() -> reqwest::Client {
-        reqwest::Client::builder()
-            .timeout(PROBE_TIMEOUT)
-            .connect_timeout(Duration::from_millis(500))
-            .build()
-            .unwrap()
+    /// `probe_once` takes the state (it needs the per-provider transports), and
+    /// the state owns the store — so the assertions read the same one through
+    /// it. `GatewayState::new` builds the production client, which is what
+    /// these tests want: every provider here points at a closed port.
+    fn state(store: Store) -> Arc<crate::server::GatewayState> {
+        Arc::new(crate::server::GatewayState::new(store).unwrap())
     }
 
     /// One request recorded against a provider, `secs` ago.
@@ -174,8 +184,9 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.insert_provider(&provider("dead")).unwrap();
 
-        probe_once(&store, &client()).await;
-        let rows = store.list_provider_health().unwrap();
+        let state = state(store);
+        probe_once(&state).await;
+        let rows = state.store.list_provider_health().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, "down");
         assert_eq!(rows[0].latency_ms, Some(0));
@@ -188,8 +199,9 @@ mod tests {
         p.enabled = false;
         store.insert_provider(&p).unwrap();
 
-        probe_once(&store, &client()).await;
-        assert!(store.list_provider_health().unwrap().is_empty());
+        let state = state(store);
+        probe_once(&state).await;
+        assert!(state.store.list_provider_health().unwrap().is_empty());
     }
 
     /// The scope this prober exists for: a provider whose latency the Status
@@ -203,8 +215,10 @@ mod tests {
         recorded(&store, "busy", 60); // a minute ago
         recorded(&store, "idle", 2 * 86_400); // two days ago — outside the window
 
-        probe_once(&store, &client()).await;
-        let probed: Vec<String> = store
+        let state = state(store);
+        probe_once(&state).await;
+        let probed: Vec<String> = state
+            .store
             .list_provider_health()
             .unwrap()
             .into_iter()

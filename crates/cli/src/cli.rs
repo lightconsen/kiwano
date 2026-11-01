@@ -674,6 +674,10 @@ pub struct EditArgs {
     #[arg(long, conflicts_with = "headers")]
     pub no_headers: bool,
 
+    /// Remove the configured proxy, so this provider goes direct again
+    #[arg(long, conflicts_with = "proxy")]
+    pub no_proxy: bool,
+
     /// Remove the configured plan query, so `providers quota` has nothing to ask
     #[arg(long, conflicts_with = "plan_query")]
     pub clear_plan_query: bool,
@@ -754,6 +758,11 @@ pub struct ForwardArgs {
     /// Merged after credential injection, so these can override it.
     #[arg(long = "header", value_name = "NAME: VALUE")]
     pub headers: Vec<String>,
+
+    /// HTTP(S) proxy for this provider's upstream requests, e.g.
+    /// `http://127.0.0.1:1087`. Other providers are unaffected.
+    #[arg(long, value_name = "URL")]
+    pub proxy: Option<String>,
 
     /// Additional endpoint for another protocol, `PROTO=URL` (repeatable)
     #[arg(long = "endpoint-extra", value_name = "PROTO=URL")]

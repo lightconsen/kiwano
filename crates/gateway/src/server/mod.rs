@@ -47,6 +47,13 @@ pub struct GatewayState {
     pub http: reqwest::Client,
     pub engine: crate::strategy::StrategyEngine,
     route_table: RwLock<Arc<RouteTable>>,
+    /// Proxied transports, one per distinct proxy URL, built on first use. A
+    /// provider that names a proxy must not leak that decision onto another's
+    /// connection — and a proxy's own failure (a dial that never connects)
+    /// must not surface as an outage on the providers that are reachable
+    /// directly. Keyed by the URL rather than the provider, so two providers
+    /// sharing one proxy also share its connection pool.
+    proxied: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
     /// Per-provider rotating cursor for multi-key round-robin
     /// (spec §4.1 P1 multi-key rotation). In-memory only; a gateway restart
     /// simply restarts each pool at its primary.
@@ -221,6 +228,46 @@ impl GatewayState {
             .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], DEFAULT_DATA_PORT)))
     }
 
+    /// The transport a provider's upstream requests go over: the shared client,
+    /// or one that dials through the provider's own proxy.
+    ///
+    /// Built lazily and cached by the proxy URL — two providers through the same
+    /// proxy share one connection pool, and a provider that never asks for one
+    /// never pays for it. A proxy URL the transport cannot parse is refused
+    /// here, so the error names the setting rather than the first request that
+    /// trips over it.
+    pub fn http_for(&self, proxy: Option<&str>) -> crate::error::Result<reqwest::Client> {
+        let Some(proxy) = proxy.filter(|p| !p.trim().is_empty()) else {
+            return Ok(self.http.clone());
+        };
+        let proxy = proxy.trim();
+        if let Some(client) = self
+            .proxied
+            .lock()
+            .expect("proxied-clients lock poisoned")
+            .get(proxy)
+        {
+            return Ok(client.clone());
+        }
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(300))
+            .pool_idle_timeout(Duration::from_secs(90))
+            // `all`, not `https`: a provider that names one proxy means every
+            // request it makes goes that way. Restricting to https would send
+            // an http endpoint direct while the operator believes it is
+            // proxied — a silent difference in where the credentials travel.
+            .proxy(reqwest::Proxy::all(proxy).map_err(|e| {
+                crate::error::GatewayError::Internal(format!("invalid proxy URL `{proxy}`: {e}"))
+            })?)
+            .build()?;
+        self.proxied
+            .lock()
+            .expect("proxied-clients lock poisoned")
+            .insert(proxy.to_string(), client.clone());
+        Ok(client)
+    }
+
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
         let log_config = store.load_log_config().unwrap_or_default();
@@ -256,6 +303,7 @@ impl GatewayState {
             http,
             engine: crate::strategy::StrategyEngine::new(),
             route_table: RwLock::new(route_table),
+            proxied: std::sync::Mutex::new(std::collections::HashMap::new()),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             key_pins: std::sync::Mutex::new(crate::strategy::sticky::StickyTable::new()),
             log_cfg: RwLock::new(log_config),
@@ -713,5 +761,66 @@ mod tests {
             table.find("", "claude-opus-4-8").is_none(),
             "and nothing else is"
         );
+    }
+
+    /// A provider that names a proxy is routed through it; everyone else is
+    /// not — which is the whole point of the setting. Proved end to end rather
+    /// than by identity: `reqwest::Client` has no equality, and "a different
+    /// client" would not be the property worth having anyway. The observable
+    /// one is that the proxy sees the request.
+    #[tokio::test]
+    async fn a_proxied_provider_sends_through_its_proxy() {
+        // A proxy that records what it is asked to open and answers with a bare
+        // 200, whatever the method. Nothing about the request matters to this
+        // test — only that it arrived here.
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        let proxy = axum::Router::new().fallback(move || {
+            let c = counter.clone();
+            async move {
+                c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                "ok"
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, proxy).await;
+        });
+
+        let state = GatewayState::new(Store::open_in_memory().unwrap()).unwrap();
+
+        // Through the proxy: an address that only the proxy could resolve.
+        let client = state
+            .http_for(Some(&format!("http://{addr}")))
+            .expect("a proxy URL the transport accepts");
+        let _ = client
+            .get("http://upstream.invalid/v1/messages")
+            .send()
+            .await;
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the request went through the proxy"
+        );
+
+        // And with no proxy named, nothing is sent to it: the shared client
+        // resolves the host itself and fails, which is the honest answer for an
+        // address that does not exist.
+        assert!(state
+            .http
+            .get("http://upstream.invalid/v1/messages")
+            .send()
+            .await
+            .is_err());
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the default transport does not use the proxy"
+        );
+
+        // A URL nothing can parse is refused where it is named, rather than
+        // failing on the first request that trips over it.
+        assert!(state.http_for(Some("not a url")).is_err());
     }
 }

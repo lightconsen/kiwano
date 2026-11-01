@@ -18,8 +18,8 @@ impl Store {
                                     api_key, billing, period_limit, limit_unit, plan_query,
                                     plan_limits, timeout_secs, retries, headers,
                                     reset_period, enabled, created_at, updated_at, model_default,
-                                    prices)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                                    prices, proxy)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 p.id,
                 p.name,
@@ -43,6 +43,7 @@ impl Store {
                 p.updated_at,
                 p.model_default,
                 p.prices,
+                p.proxy,
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -57,7 +58,7 @@ impl Store {
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at, catalog_id,
-                    model_default, prices, openai_wire
+                    model_default, prices, openai_wire, proxy
              FROM providers WHERE id = ?1",
         )?;
         let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -74,7 +75,7 @@ impl Store {
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at, catalog_id,
-                    model_default, prices, openai_wire
+                    model_default, prices, openai_wire, proxy
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -103,7 +104,7 @@ impl Store {
                     limit_unit = ?10, plan_query = ?11, plan_limits = ?12,
                     timeout_secs = ?13, retries = ?14, headers = ?15,
                     reset_period = ?16, enabled = ?17, updated_at = ?18, model_default = ?19,
-                    prices = ?20, openai_wire = ?21
+                    prices = ?20, openai_wire = ?21, proxy = ?22
              WHERE id = ?1",
             params![
                 p.id,
@@ -127,6 +128,7 @@ impl Store {
                 p.model_default,
                 p.prices,
                 p.openai_wire.as_str(),
+                p.proxy,
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -169,6 +171,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         updated_at: row.get(17)?,
         model_default: row.get(19)?,
         prices: row.get(20)?,
+        proxy: row.get(22)?,
     })
 }
 
@@ -220,6 +223,40 @@ mod tests {
     use super::*;
     use crate::store::test_support::{sample_provider, temp_store};
     use crate::store::types::Binding;
+
+    /// v37: a per-provider proxy round-trips, and NULL is the "go direct"
+    /// every provider written before the column existed carries.
+    #[test]
+    fn a_provider_proxy_roundtrips_and_clears() {
+        let (_dir, store) = temp_store();
+
+        let mut p = sample_provider("p-proxied", Protocol::Anthropic);
+        assert!(
+            p.proxy.is_none(),
+            "a new row goes direct until told otherwise"
+        );
+        p.proxy = Some("http://127.0.0.1:1087".into());
+        store.insert_provider(&p).unwrap();
+
+        let got = store.get_provider("p-proxied").unwrap().unwrap();
+        assert_eq!(got.proxy.as_deref(), Some("http://127.0.0.1:1087"));
+        // `list` reads the column too — the route table is built from it.
+        assert_eq!(
+            store.list_providers().unwrap()[0].proxy.as_deref(),
+            Some("http://127.0.0.1:1087")
+        );
+
+        // Clearing it puts the provider back on the default transport.
+        let mut updated = got.clone();
+        updated.proxy = None;
+        store.update_provider(&updated).unwrap();
+        assert!(store
+            .get_provider("p-proxied")
+            .unwrap()
+            .unwrap()
+            .proxy
+            .is_none());
+    }
 
     /// v7: additional per-protocol endpoints round-trip with the provider row
     /// and cascade away on delete.

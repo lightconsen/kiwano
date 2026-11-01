@@ -245,7 +245,26 @@ impl SendFailure {
         let url = crate::log_capture::redact_url(url);
         match self {
             SendFailure::Timeout(secs) => format!("request to `{url}` timed out after {secs}s"),
-            SendFailure::Transport(e) => format!("request to `{url}` failed: {e}"),
+            // reqwest's own `Display` is the summary ("error sending request"),
+            // and the reason — a DNS failure, a refused connection, a TLS
+            // handshake, a proxy that is not there — lives in the source chain
+            // below it. Without the chain the row says only that something
+            // went wrong, which is exactly the case where the operator needs to
+            // know *what*: a blocked host and a dead proxy look identical from
+            // the summary alone.
+            SendFailure::Transport(e) => {
+                let mut causes: Vec<String> = Vec::new();
+                let mut source = std::error::Error::source(e);
+                while let Some(s) = source {
+                    causes.push(s.to_string());
+                    source = s.source();
+                }
+                if causes.is_empty() {
+                    format!("request to `{url}` failed: {e}")
+                } else {
+                    format!("request to `{url}` failed: {e} ({})", causes.join(": "))
+                }
+            }
         }
     }
 }
@@ -343,8 +362,29 @@ pub(crate) async fn send_upstream(
         // Timed per attempt, not per request: what a retry cost in wall-clock
         // terms is the number that makes a flaky upstream visible.
         let attempt_started = Instant::now();
-        let send = state
-            .http
+        // The transport this provider answers over. A proxied provider gets a
+        // client that dials through its proxy; everyone else shares the
+        // gateway's own, so a proxy that is down takes down only the providers
+        // that go through it.
+        let client = match state.http_for(provider.proxy.as_deref()) {
+            Ok(c) => c,
+            Err(e) => {
+                let message = e.to_string();
+                let resp = error_into_response(e, inbound);
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    capture,
+                    Some(agent.to_string()),
+                    Some(attribution.to_string()),
+                    Some(provider.id.clone()),
+                    resp.status(),
+                    "proxy_config",
+                    message,
+                );
+                return Err(resp);
+            }
+        };
+        let send = client
             .request(method.clone(), url)
             .headers(headers.clone())
             .body(body.clone())

@@ -365,7 +365,7 @@ fn edit_patch(
         } else {
             Some(parse_extra_endpoints(&args.forward.endpoint_extra)?)
         },
-        advanced: advanced_patch(&args.forward, args.no_headers)?,
+        advanced: advanced_patch(&args.forward, args.no_headers, args.no_proxy)?,
         // Doubled: `None` = not speaking about it, `Some(None)` = clear —
         // which is what `--clear-plan-query` means, and why the field cannot be
         // a plain `Option<Value>`.

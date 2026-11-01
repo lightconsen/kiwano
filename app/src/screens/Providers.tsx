@@ -22,7 +22,7 @@ import {
 } from "../api/types";
 import { AGENT_ICON } from "../components/bits";
 import StrategyPanel from "../components/StrategyPanel";
-import { NO_CLI_AGENTS, SEGMENTS } from "./Providers/agents";
+import { NO_CLI_AGENTS, SEGMENTS, type AgentView } from "./Providers/agents";
 import { AccessDialog } from "./Providers/AccessDialog";
 import { AgentSettingsDialog } from "./Providers/AgentSettingsDialog";
 import { NewAgentDialog } from "./Providers/NewAgentDialog";
@@ -30,6 +30,7 @@ import { DeclareAgentDirDialog, dirOf, type Redetect } from "./Providers/Declare
 import { AgentTabTitle } from "./Providers/AgentTabTitle";
 import { HeaderActions } from "./Providers/HeaderActions";
 import { ProviderTable } from "./Providers/ProviderTable";
+import { RouteGraph } from "./Providers/RouteGraph";
 import { SegmentStrip } from "./Providers/SegmentStrip";
 
 export default function Providers({
@@ -56,6 +57,9 @@ export default function Providers({
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [routes, setRoutes] = useState<AgentRoute[] | null>(null);
   const [seg, setSeg] = useState<AgentRef | "all">(initialAgent ?? "all");
+  // Table or picture, per session and shared by every agent tab: a reader who
+  // prefers one over the other prefers it for all of them.
+  const [agentView, setAgentView] = useState<AgentView>("table");
   const [takenOver, setTakenOver] = useState<Set<AgentRef> | null>(null);
   const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
   const [newAgent, setNewAgent] = useState(false);
@@ -431,6 +435,9 @@ export default function Providers({
   const agentProtocols = seg === "all" ? [] : (protocolsByAgent[seg] ?? []);
   // Inside an agent tab with bindings the list IS the strategy candidate queue
   const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
+  // …and a candidate only counts when its provider row is in hand: a binding
+  // whose provider was deleted mid-session is skipped by the table, so the
+  // picture has to skip it too rather than draw a frame with nothing in it.
   // The currencies a ceiling on this agent may be written in: what the providers
   // it is bound to bill in. An agent whose providers say nothing — none bound
   // yet, or none of them linked to a catalog entry and none with declared
@@ -451,6 +458,10 @@ export default function Providers({
     return own.length > 0 ? own.sort() : knownCurrencies;
   };
   const byId = new Map(providers.map((p) => [p.id, p]));
+  // A candidate only counts when its provider row is in hand: a binding whose
+  // provider was deleted mid-session is skipped by the table, so the picture
+  // has to skip it too rather than draw a frame with nothing in it.
+  const drawable = route?.bindings.some((b) => byId.has(b.provider_id)) ?? false;
   // The agent this tab belongs to, when the user defined it: routes and a key,
   // and no config file anywhere.
   const custom = seg === "all" ? undefined : customAgents.find((a) => a.id === seg);
@@ -482,6 +493,8 @@ export default function Providers({
             takenOver={takenOver}
             setAccessOpen={setAccessOpen}
             setAgentSettingsOpen={setAgentSettingsOpen}
+            view={agentView}
+            onToggleView={() => setAgentView((v) => (v === "table" ? "graph" : "table"))}
           />
         )}
         {loadErr && (
@@ -502,27 +515,36 @@ export default function Providers({
         />
       </div>
 
-      <ProviderTable
-        seg={seg}
-        custom={custom}
-        takenOver={takenOver}
-        agentDetect={agentDetect}
-        enabling={enabling}
-        setAgentTakenOver={setAgentTakenOver}
-        takeoverError={takeoverError}
-        onAdd={onAdd}
-        route={route}
-        byId={byId}
-        planQuotas={planQuotas}
-        blocked={blocked}
-        onMoveBinding={onMoveBinding}
-        refetch={refetch}
-        filtered={filtered}
-        routes={routes}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        providers={providers}
-      />
+      {/* The picture only replaces a table that has rows to draw. Everything
+          else — the takeover onboarding, an agent with no candidates — is the
+          table's own answer to "there is no route yet", and a graph of nothing
+          would be a worse version of it. So the switch decides between two
+          renderings of the same route, never between "route" and "no route". */}
+      {seg !== "all" && route && drawable && agentView === "graph" ? (
+        <RouteGraph agent={seg} route={route} byId={byId} blocked={blocked} />
+      ) : (
+        <ProviderTable
+          seg={seg}
+          custom={custom}
+          takenOver={takenOver}
+          agentDetect={agentDetect}
+          enabling={enabling}
+          setAgentTakenOver={setAgentTakenOver}
+          takeoverError={takeoverError}
+          onAdd={onAdd}
+          route={route}
+          byId={byId}
+          planQuotas={planQuotas}
+          blocked={blocked}
+          onMoveBinding={onMoveBinding}
+          refetch={refetch}
+          filtered={filtered}
+          routes={routes}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          providers={providers}
+        />
+      )}
 
       {/* Strategy config lives in the agent's own tab. For a built-in that means
           once it is taken over (before that there is no live route to configure);

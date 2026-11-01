@@ -250,6 +250,64 @@ describe("an agent tab's row actions", () => {
   });
 });
 
+describe("the agent tab's two views", () => {
+  /** The graph's accessible name, filled the way the component fills it. */
+  const graphAria = (strategy: string, n: number) =>
+    en.providers.graphAria
+      .replace("{agent}", "Codex")
+      .replace("{strategy}", strategy)
+      .replace("{n}", String(n));
+
+  it("swaps the route for a picture and back, without touching the route", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    // The table, which is what the tab opens on: its column header is the
+    // thing the picture does not have.
+    expect(await screen.findByText(en.providers.colPriority)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: graphAria(en.strategy.single, 1) })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: en.providers.viewGraph }));
+
+    const graph = screen.getByRole("img", { name: graphAria(en.strategy.single, 1) });
+    expect(within(graph).getByText("DeepSeek")).toBeInTheDocument();
+    // The table is gone, not merely hidden behind it.
+    expect(screen.queryByText(en.providers.colPriority)).toBeNull();
+    expect(screen.queryByLabelText(en.providers.removeFromRouteAria)).toBeNull();
+    // A read-only view: switching changes nothing about the route.
+    expect(apiMock.updateAgentStrategy).not.toHaveBeenCalled();
+    expect(apiMock.addAgentBinding).not.toHaveBeenCalled();
+
+    // And back — the button now offers the view it is not showing.
+    await user.click(screen.getByRole("button", { name: en.providers.viewTable }));
+    expect(await screen.findByText(en.providers.colPriority)).toBeInTheDocument();
+  });
+
+  it("keeps the table when there is no route to draw", async () => {
+    // An agent with no candidates: the picture would be an empty frame, and
+    // the table's own "bind one" panel is the answer the reader needs.
+    renderCodexTab({
+      providers: [deepseek({ agents: [], serving_agents: [] })],
+      routes: [codexRoute([])],
+      codexTakenOver: true,
+    });
+
+    const user = userEvent.setup();
+    // The empty route's own panel, before the switch is touched.
+    expect(await screen.findByText(en.providers.takenOverBody)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: en.providers.viewGraph }));
+    // Still that panel: nothing was swapped for a frame with no candidates in
+    // it, and the switch stays offered because the route can gain one.
+    expect(screen.getByText(en.providers.takenOverBody)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: graphAria(en.strategy.single, 0) })).toBeNull();
+  });
+});
+
 describe("a user-defined agent", () => {
   const longTasks: CustomAgent = {
     id: "long-tasks-3f9a",

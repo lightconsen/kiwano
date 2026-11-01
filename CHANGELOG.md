@@ -21,6 +21,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **An agent's route can be read as a picture.** The Apps page's agent tabs
+  gained a switch beside the agent's settings — table or graph — and the graph
+  draws what the strategy is doing: the agent, the gateway, and the candidate
+  providers in priority order, each carrying the fact its own strategy cares
+  about (rank, weight, or the time window it owns) plus which one is serving
+  now and which the gateway is refusing. It is a read view: reordering,
+  removing and the strategy itself stay in the table and the panel below it.
 - **The theme has a System option, and it keeps following the OS.** Dark and
   light are still there; System resolves from the operating system's appearance
   and re-resolves when that changes while the window is open — the native window

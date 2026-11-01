@@ -73,6 +73,10 @@ export const providers = {
   cacheNoData: "近 7 天沒有輸入側 tokens，無從計算命中率",
   colStatus: "狀態",
   colPriority: "優先順序",
+
+  viewGraph: "圖形檢視",
+  viewTable: "表格檢視",
+  graphAria: "{agent} 的路由：{strategy}，{n} 個候選",
   colActions: "操作",
 
   // ── Agent-tab role cell ──

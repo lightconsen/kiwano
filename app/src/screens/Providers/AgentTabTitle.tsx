@@ -5,13 +5,13 @@
 // *about* the agent, and they are read where they are acted on, in that
 // dialog. A built-in that is not taken over renders nothing — there is no
 // file to point at, and the onboarding panel below says the rest.
-import { Settings2 } from "lucide-react";
+import { Settings2, Table2, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { useT } from "../../i18n";
 import { agentMeta } from "../../lib/agents";
 import { type AgentRef, type CustomAgent } from "../../api/types";
-import { SEGMENT_ICON } from "./agents";
+import { SEGMENT_ICON, type AgentView } from "./agents";
 
 export function AgentTabTitle({
   seg,
@@ -19,6 +19,8 @@ export function AgentTabTitle({
   takenOver,
   setAccessOpen,
   setAgentSettingsOpen,
+  view,
+  onToggleView,
 }: {
   seg: AgentRef | "all";
   /** The agent this tab belongs to, when the user defined it. */
@@ -28,8 +30,25 @@ export function AgentTabTitle({
   takenOver: Set<AgentRef> | null;
   setAccessOpen: (open: boolean) => void;
   setAgentSettingsOpen: (open: boolean) => void;
+  /** How the rows below are drawn, and the switch that changes it. The button
+      shows the view it will *switch to*, which is what the icon has to answer:
+      the current one is already on screen. */
+  view: AgentView;
+  onToggleView: () => void;
 }) {
   const t = useT();
+  const viewButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
+      aria-label={view === "table" ? t("providers.viewGraph") : t("providers.viewTable")}
+      title={view === "table" ? t("providers.viewGraph") : t("providers.viewTable")}
+      onClick={onToggleView}
+    >
+      {view === "table" ? <Workflow className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
+    </Button>
+  );
   return (
     <>
       {custom && (
@@ -63,6 +82,7 @@ export function AgentTabTitle({
           >
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
+          {viewButton}
         </div>
       )}
 
@@ -93,6 +113,7 @@ export function AgentTabTitle({
           >
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
+          {viewButton}
         </div>
       )}
     </>

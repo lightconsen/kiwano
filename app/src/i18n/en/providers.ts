@@ -102,6 +102,11 @@ export const providers = {
   cacheNoData: "No input-side tokens in the last 7 days — nothing to rate",
   colStatus: "Status",
   colPriority: "Priority",
+
+  // ── The agent tab's two views ──
+  viewGraph: "Graph view",
+  viewTable: "Table view",
+  graphAria: "Route for {agent}: {strategy}, {n} candidates",
   colActions: "Actions",
 
   // ── Agent-tab role cell ──

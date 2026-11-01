@@ -77,6 +77,10 @@ export const providers = {
   cacheNoData: "直近7日間に入力側トークンがないため、ヒット率を算出できません",
   colStatus: "ステータス",
   colPriority: "優先度",
+
+  viewGraph: "グラフ表示",
+  viewTable: "表表示",
+  graphAria: "{agent} のルート：{strategy}、候補 {n} 件",
   colActions: "操作",
 
   // ── Agent-tab role cell ──

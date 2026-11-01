@@ -14,6 +14,11 @@ import { type AgentId, type AgentRef } from "../../api/types";
 // same two are the ones missing from `CLI_AGENTS` on the Rust side.
 export const NO_CLI_AGENTS: AgentId[] = ["claude-desktop", "workbuddy", "hanaagent"];
 
+/** How an agent tab draws its route: the candidate table, or the same route as
+    a picture. A view of one route, not a mode of the screen — the All tab is
+    always the table, and this switch only exists where there is a route. */
+export type AgentView = "table" | "graph";
+
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
 export const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[] = [

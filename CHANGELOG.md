@@ -19,6 +19,18 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-11-02
+
+**The version where the two charts finally show the same week.** A provider
+row's 7-day trend and the Dashboard's "Last 7 days" bars were drawing different
+weeks: one bucketed by UTC date, the other by your local days, one a rolling
+168 hours and the other today plus six, and empty days were missing from the
+line entirely. They now read one series, so the row you click through from and
+the chart you land on cannot disagree.
+
+This release also carries 0.4.7's crash fix: a JWT inside a prompt used to
+panic the credential scrubber and take the gateway down with it.
+
 ### Fixed
 
 - **The Apps row's 7-day trend now shows the same days as the Dashboard's.**

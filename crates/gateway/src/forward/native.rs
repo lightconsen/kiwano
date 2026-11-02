@@ -521,6 +521,7 @@ fn answer_count_tokens(
             cost_off_peak: None,
             request_notes: l.request_notes,
             upstream_key: None,
+            turns: l.capture.turns,
         };
         if let Err(e) = store.insert_request_log(&entry) {
             tracing::warn!(error = %e, "failed to persist count_tokens estimate");

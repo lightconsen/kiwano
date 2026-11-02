@@ -224,7 +224,15 @@ fn merge(imported: Option<&SessionRow>, traffic: Option<&TrafficSession>) -> Ses
         started_at,
         ended_at,
         requests: traffic.map(|t| t.requests).unwrap_or(0),
-        turns: imported.map(|i| i.turns).unwrap_or(0),
+        // The files' count when they have one, and otherwise the one the
+        // traffic itself measured: a chat-shaped client resends the whole
+        // history on every turn, so the gateway can read a session's length
+        // off its requests even when no file was ever imported. The two are
+        // not summed — a turn and the requests it took are different counts.
+        turns: match imported {
+            Some(i) => i.turns,
+            None => traffic.and_then(|t| t.turns).unwrap_or(0),
+        },
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -491,6 +499,35 @@ mod tests {
             row.started_at, "2026-09-03T10:00:00+00:00",
             "the traffic span"
         );
+    }
+
+    /// The files are not the only side that can count turns: a chat-shaped
+    /// client resends its history on every request, so the traffic's own
+    /// maximum is a gateway-only session's turn count (migration v38).
+    #[test]
+    fn a_gateway_only_session_reads_its_turn_count_from_the_traffic() {
+        let (_dir, store) = store_with_traffic();
+        let mut log = sample_log("2026-09-03T11:00:00+00:00", Some("claude"), 200);
+        log.session_id = Some("s-gateway".into());
+        log.provider_id = Some("p-1".into());
+        log.turns = Some(42);
+        store.insert_request_log(&log).unwrap();
+
+        let rows = list_sessions(&store, None, None, None).unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r.session_id == "s-gateway")
+            .expect("the traffic-only row");
+        assert_eq!(row.source, "gateway");
+        assert_eq!(row.turns, 42);
+        // And the imported side still wins where both have a count: a file's
+        // turn is not a request's, and the file is the one that was there.
+        store
+            .upsert_imported_sessions(&[imported("claude", "s-both", Some("kiwano"))])
+            .unwrap();
+        let rows = list_sessions(&store, None, None, None).unwrap();
+        let both = rows.iter().find(|r| r.session_id == "s-both").unwrap();
+        assert_eq!(both.turns, 12, "the files' count, not the traffic's");
     }
 
     /// v32: the machine a session was imported from reaches the view, and it

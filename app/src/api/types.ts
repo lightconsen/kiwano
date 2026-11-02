@@ -872,7 +872,11 @@ export interface Session {
   ended_at: string;
   /** Traffic only — a turn in a file is not a request. */
   requests: number;
-  /** Files only. */
+  /** Whichever side can count them: the files' turns, or — for a session only
+      the gateway saw — the largest assistant-message count any of its
+      chat-shaped requests carried (v38). `0` on a traffic-only row means no
+      request measured a count (a Responses-shaped body, or one from before
+      the column existed), so the list shows `—` rather than a zero. */
   turns: number;
   input_tokens: number;
   output_tokens: number;

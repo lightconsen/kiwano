@@ -128,8 +128,13 @@ export function SessionsTable({
               <td className="px-1.5 py-1.5 text-right align-top">
                 {r.source === "imported" ? "—" : r.requests}
               </td>
+              {/* A gateway row can now answer for itself: the daemon counts the
+                  assistant turns in each chat-shaped request body and takes the
+                  session's maximum (v38). `0` still reads as "not measured" —
+                  a Responses-shaped request, or a row from before the count
+                  existed, carries none. */}
               <td className="px-1.5 py-1.5 text-right align-top">
-                {r.source === "gateway" ? "—" : r.turns}
+                {r.source === "imported" || r.turns > 0 ? r.turns : "—"}
               </td>
               {/* Two of the four buckets, and the other two on hover: cache reads
                   dwarf everything else on a long conversation, and a list is for

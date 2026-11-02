@@ -12,7 +12,8 @@
 //     badge is what says so.
 //   - `imported` — only a file has it, so there are no requests and no money at
 //     all. A zero there would read as "measured zero"; the table prints `—`.
-//   - `gateway` — only the gateway saw it, so there is no project and no turns.
+//   - `gateway` — only the gateway saw it, so there is no project; its turns
+//     come from the traffic itself (v38), not from a file.
 //
 // The `both` row reuses the session id the request-log fixtures already carry
 // (`dev/logs.ts`), so the drill-down from this table lands on real rows.
@@ -128,7 +129,10 @@ export const sessions: Session[] = [
     started_at: daysAgo(0, 8, 5),
     ended_at: daysAgo(0, 8, 19),
     requests: 5,
-    turns: 0,
+    // A traffic-only session's own count: the daemon reads it off the chat
+    // history each request resends, so the gateway can answer for turns even
+    // when no file was ever imported.
+    turns: 37,
     input_tokens: 2_050,
     output_tokens: 900,
     cache_read_tokens: 3_100,

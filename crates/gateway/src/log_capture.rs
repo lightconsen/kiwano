@@ -495,6 +495,9 @@ pub struct RequestCapture {
     /// capture, because that is where the body and the setting are both in
     /// scope.
     pub dlp_note: Option<String>,
+    /// Assistant turns in this request's conversation, from
+    /// [`count_turns`]. `None` when the request named no conversation.
+    pub turns: Option<i64>,
 }
 
 impl RequestCapture {
@@ -520,6 +523,7 @@ impl RequestCapture {
             request_size: 0,
             truncated: false,
             dlp_note: None,
+            turns: None,
         })
     }
 
@@ -529,6 +533,10 @@ impl RequestCapture {
     /// stored.
     pub fn set_body(&mut self, body: &[u8], max_body_bytes: Option<usize>, secrets: &Redactor) {
         self.request_size = body.len() as i64;
+        // Counted from the bytes the client sent, before the capture cap cuts
+        // them: the turn count is one number, and a truncated tail would only
+        // ever lower it.
+        self.turns = count_turns(body);
         // The same cap-then-redact the response side uses, rather than a
         // second copy of it: the two halves of one exchange should cut and
         // scrub at the same place, and a rule stated twice is a rule that can
@@ -537,6 +545,32 @@ impl RequestCapture {
         self.truncated = truncated;
         self.request_body = Some(text);
     }
+}
+
+/// How many assistant turns a request's conversation has had, counted from
+/// the `messages` array the client sent.
+///
+/// Chat-shaped clients (Claude Code, CodeRex, OpenCode, …) resend the whole
+/// history on every turn, so one request already carries the answer — the
+/// sessions list otherwise has no turn count for a conversation the files
+/// never described. The count is per *request*, and the session view takes
+/// the maximum over a session's rows rather than a sum: each turn resends a
+/// longer history, so summing would count the same turns once per request.
+///
+/// `None` when there is no `messages` array to count — a Responses-shaped
+/// body, an embeddings call, a body that is not JSON. That is a real "not
+/// measured", distinct from a chat request whose conversation has no
+/// assistant turn yet, which is `Some(0)`. Counted from the untruncated
+/// bytes, so the capture cap cannot make a long conversation look short.
+pub fn count_turns(body: &[u8]) -> Option<i64> {
+    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let messages = v.get("messages")?.as_array()?;
+    Some(
+        messages
+            .iter()
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+            .count() as i64,
+    )
 }
 
 /// Truncate response bytes to the capture cap, lossy-decode them, and scrub
@@ -639,6 +673,9 @@ pub fn persist_attempt_failure(
         request_notes: None,
         // No pool entry: these rows are failures, and nothing served them.
         upstream_key: None,
+        // The turn count is the request's, not the attempt's: it is read from
+        // the body the client sent, and a failed attempt had that body too.
+        turns: c.turns,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist attempt log");
@@ -702,6 +739,9 @@ pub fn persist_failure(
         request_notes: None,
         // No pool entry: these rows are failures, and nothing served them.
         upstream_key: None,
+        // The turn count is the request's, not the attempt's: it is read from
+        // the body the client sent, and a failed attempt had that body too.
+        turns: c.turns,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist request log");
@@ -924,6 +964,36 @@ mod tests {
             .expect("capture");
         c.set_body(body.as_bytes(), Some(1024 * 1024), &Redactor::default());
         c
+    }
+
+    /// A chat-shaped client resends the whole history, so one request already
+    /// says how long the conversation is — the number the sessions list shows
+    /// for a conversation the files never described.
+    #[test]
+    fn turns_are_counted_from_the_chat_history() {
+        let body = r#"{"model":"m","messages":[
+            {"role":"system","content":"s"},
+            {"role":"user","content":"one"},
+            {"role":"assistant","content":"a1"},
+            {"role":"user","content":"two"},
+            {"role":"assistant","content":"a2"}
+        ]}"#;
+        assert_eq!(count_turns(body.as_bytes()), Some(2));
+        // The count rides on the capture, and is taken from the untruncated
+        // bytes: a cap that cuts the stored body must not shorten it.
+        let c = capture_with_body(body);
+        assert_eq!(c.turns, Some(2));
+
+        // A conversation that has not been answered yet is zero, not unknown.
+        assert_eq!(
+            count_turns(br#"{"messages":[{"role":"user","content":"hi"}]}"#),
+            Some(0)
+        );
+
+        // Not a chat body at all: nothing was measured, which is not a zero.
+        assert_eq!(count_turns(br#"{"input":"embed this"}"#), None);
+        assert_eq!(count_turns(b"not json"), None);
+        assert_eq!(count_turns(br#"{"messages":"oops"}"#), None);
     }
 
     #[test]

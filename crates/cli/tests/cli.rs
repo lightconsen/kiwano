@@ -1520,6 +1520,7 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
             cost_off_peak: None,
             request_notes: None,
             upstream_key: None,
+            turns: None,
         })
         .unwrap();
 }
@@ -1569,6 +1570,7 @@ fn seed_session_log(
             cost_off_peak: None,
             request_notes: None,
             upstream_key: None,
+            turns: None,
         })
         .unwrap();
 }
@@ -2198,6 +2200,7 @@ fn seed_insight_row(
             cost_off_peak: None,
             request_notes: None,
             upstream_key: None,
+            turns: None,
         })
         .unwrap()
 }

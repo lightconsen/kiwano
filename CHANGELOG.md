@@ -32,6 +32,26 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   body kept for replay, so a key you just swapped is not still reported as
   invalid.
 
+- **A session's turn count now comes from the traffic too.** The Sessions list
+  used to show `—` for every conversation only the gateway saw, because turns
+  were read from the agent's own transcript files and nowhere else. Chat-shaped
+  clients resend the whole history on every request, so the gateway counts the
+  assistant messages in each request body and reports the session's maximum —
+  one number, read from bytes the capture cap never shortened. A Responses-shaped
+  request still carries no count, and neither do rows written before this
+  version, so those read `—` rather than a zero.
+
+### Fixed
+
+- **A session marker that is a JSON blob no longer fragments a conversation.**
+  Clients that wrap their session id in `metadata.user_id` — CodeRex, and Claude
+  Code without its session header — had the whole blob used as the id, so each
+  request became a session of its own (over a thousand rows on one machine,
+  many of them a literal `"unknown"`). The blob is now unwrapped to the id it
+  carries, and placeholder values (`unknown`, `none`, `null`, `undefined`,
+  `n/a`) are treated as "no session stated" at every tier, header and body, so
+  the request falls through to the derived conversation fingerprint instead.
+
 ## [0.4.5] - 2026-11-01
 
 **The version where a provider has a page of its own.** The Apps list is an

@@ -94,6 +94,7 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
             // The other half of attribution, from the same frozen record as
             // `usage` above — the two rows must agree about who paid.
             upstream_key: record.upstream_key.clone(),
+            turns: log.capture.turns,
         };
         let log_id = match state.store.insert_request_log(&entry) {
             Ok(id) => id,

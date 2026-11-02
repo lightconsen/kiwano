@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 37;
+pub const SCHEMA_VERSION: i32 = 38;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -981,6 +981,21 @@ const MIGRATION_V37: &str = r#"
 ALTER TABLE providers ADD COLUMN proxy TEXT;
 "#;
 
+/// v38: how many assistant turns one request's conversation had, counted from
+/// the request body the client sent — chat-shaped clients resend the whole
+/// history on every turn, so the last request of a session carries its length.
+///
+/// NULL when the request named no conversation (Responses shape, embeddings,
+/// a body that was not JSON) or the capture was off. The sessions list reads
+/// it as `MAX(turns)` over a session's rows: each turn resends a longer
+/// history, so the maximum is the session's turn count rather than a sum
+/// (which would count the same turns once per request). Rows written before
+/// this column exist are NULL, and stay that way — a session is only given a
+/// turn count when a request actually measured it.
+const MIGRATION_V38: &str = r#"
+ALTER TABLE request_logs ADD COLUMN turns INTEGER;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1151,6 +1166,9 @@ impl Store {
         }
         if version < 37 {
             conn.execute_batch(MIGRATION_V37)?;
+        }
+        if version < 38 {
+            conn.execute_batch(MIGRATION_V38)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

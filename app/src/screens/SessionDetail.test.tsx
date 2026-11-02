@@ -130,13 +130,24 @@ describe("a session's own page", () => {
     expect(cost.parentElement?.textContent).toContain(en.common.none);
     unmount();
 
-    // And the other way round: a traffic-only session has no turns to report.
+    // And the other way round: a traffic-only session has no turns to report
+    // when none of its requests carried a chat history to count.
     apiMock.getSession.mockResolvedValue(
       session({ source: "gateway", project: null, machine: null, turns: 0 }),
     );
     renderDetail();
     const turns = await screen.findByText(en.dashboard.sessionTurns);
     expect(turns.parentElement?.textContent).toContain(en.common.none);
+  });
+
+  it("shows the turn count the traffic measured for a gateway-only session", async () => {
+    apiMock.getSession.mockResolvedValue(
+      session({ source: "gateway", project: null, machine: null, turns: 42 }),
+    );
+    renderDetail();
+    const turns = await screen.findByText(en.dashboard.sessionTurns);
+    expect(turns.parentElement?.textContent).toContain("42");
+    expect(turns.parentElement?.textContent).not.toContain(en.common.none);
   });
 
   it("tells a file that recorded no tools apart from a session with no file", async () => {

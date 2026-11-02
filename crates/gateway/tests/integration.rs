@@ -4585,6 +4585,7 @@ async fn the_session_list_takes_a_caller_computed_bound() {
                 cost_off_peak: None,
                 request_notes: None,
                 upstream_key: None,
+                turns: None,
             })
             .unwrap();
     }

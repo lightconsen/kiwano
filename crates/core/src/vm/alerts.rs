@@ -255,6 +255,7 @@ mod tests {
             cost_off_peak: None,
             request_notes: None,
             upstream_key: None,
+            turns: None,
         }
     }
 

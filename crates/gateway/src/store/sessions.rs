@@ -82,6 +82,13 @@ pub struct TrafficSession {
     /// tokens are in the buckets above; `cost` is short by them, and this is how
     /// the reader is told rather than shown a total that is quietly too small.
     pub unpriced_rows: i64,
+    /// The session's turn count as the traffic measured it: the **maximum**
+    /// per-request count of assistant messages in the body (migration v38).
+    /// Each turn resends a longer history, so the latest request carries the
+    /// whole conversation's length. `None` when no row of this session carried
+    /// a chat-shaped body to count — a Responses-shaped client, or rows
+    /// written before the column existed.
+    pub turns: Option<i64>,
 }
 
 /// One session's spend in one currency — the money half of a [`TrafficSession`].
@@ -275,7 +282,8 @@ impl Store {
                         COALESCE(SUM(cache_read_tokens), 0),
                         COALESCE(SUM(cache_creation_tokens), 0),
                         COALESCE(SUM(CASE WHEN cost IS NULL THEN 1 ELSE 0 END), 0),
-                        GROUP_CONCAT(DISTINCT agent), GROUP_CONCAT(DISTINCT provider_id)
+                        GROUP_CONCAT(DISTINCT agent), GROUP_CONCAT(DISTINCT provider_id),
+                        MAX(turns)
                  FROM request_logs
                  WHERE session_id IS NOT NULL
                    AND (?1 IS NULL OR agent = ?1)
@@ -298,6 +306,9 @@ impl Store {
                     agents: split_distinct(row.get::<_, Option<String>>(9)?),
                     providers: split_distinct(row.get::<_, Option<String>>(10)?),
                     cost: Vec::new(),
+                    // MAX over the per-request counts: the last turn of a
+                    // conversation is the one that names its length.
+                    turns: row.get(11)?,
                 })
             })?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -671,5 +682,39 @@ mod tests {
             .traffic_sessions(Some("codex"), None)
             .unwrap()
             .is_empty());
+    }
+
+    /// A session's turn count is the **maximum** per-request count, not a sum:
+    /// each chat-shaped request resends the whole history, so the last one
+    /// already carries the conversation's length. A row that measured nothing
+    /// (a Responses-shaped body, or one from before the column existed) does
+    /// not drag the count down to zero — and a session where no row measured
+    /// anything has no count at all.
+    #[test]
+    fn a_sessions_turn_count_is_the_largest_one_any_request_carried() {
+        let (_dir, store) = crate::store::test_support::temp_store();
+        let row = |ts: &str, session: &str, turns: Option<i64>| {
+            let mut log = crate::store::test_support::sample_log(ts, Some("claude"), 200);
+            log.session_id = Some(session.to_string());
+            log.turns = turns;
+            log
+        };
+        for log in [
+            row("2026-09-07T10:00:00+00:00", "s-1", Some(3)),
+            row("2026-09-07T11:00:00+00:00", "s-1", Some(7)),
+            row("2026-09-07T12:00:00+00:00", "s-1", Some(5)),
+            // A request with nothing to count: not a zero, and not the answer.
+            row("2026-09-07T13:00:00+00:00", "s-1", None),
+            // A second session whose only request measured nothing.
+            row("2026-09-08T10:00:00+00:00", "s-2", None),
+        ] {
+            store.insert_request_log(&log).unwrap();
+        }
+
+        let sessions = store.traffic_sessions(None, None).unwrap();
+        let s1 = sessions.iter().find(|s| s.session_id == "s-1").unwrap();
+        assert_eq!(s1.turns, Some(7), "the maximum, not 3 + 7 + 5");
+        let s2 = sessions.iter().find(|s| s.session_id == "s-2").unwrap();
+        assert_eq!(s2.turns, None, "nothing measured is not a zero");
     }
 }

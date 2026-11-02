@@ -417,29 +417,70 @@ const SESSION_HEADERS: [&str; 6] = [
 /// better.
 pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<String> {
     if let Some(v) = headers.get("x-kw-session").and_then(|v| v.to_str().ok()) {
-        let v = v.trim();
-        if !v.is_empty() {
-            return Some(v.to_string());
+        if let Some(id) = stated_session_id(v) {
+            return Some(id);
         }
     }
     for name in SESSION_HEADERS {
         if let Some(v) = headers.get(name).and_then(|v| v.to_str().ok()) {
-            let v = v.trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
+            if let Some(id) = stated_session_id(v) {
+                return Some(id);
             }
         }
     }
     let v: serde_json::Value = serde_json::from_slice(body).ok()?;
-    v.pointer("/metadata/user_id")
-        .or_else(|| v.pointer("/client_metadata/session_id"))
-        .or_else(|| v.get("prompt_cache_key"))
-        .or_else(|| v.get("session_id"))
-        .and_then(|x| x.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .or_else(|| derived_session_hint(&v))
+    let body_ids = [
+        v.pointer("/metadata/user_id"),
+        v.pointer("/client_metadata/session_id"),
+        v.get("prompt_cache_key"),
+        v.get("session_id"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|x| x.as_str());
+    for raw in body_ids {
+        if let Some(id) = stated_session_id(raw) {
+            return Some(id);
+        }
+    }
+    derived_session_hint(&v)
+}
+
+/// Normalize one session marker a client stated, wherever it stated it.
+///
+/// Returns `None` for values that state no session at all:
+///
+/// * **Placeholders** — CodeRex's `metadata.user_id` is
+///   `{"device_id":"unknown","session_id":"unknown",…}` on requests that name
+///   no session, and each such blob landed in the log as its own session id
+///   (672 of them on one machine), one request per "conversation". A stated
+///   "unknown" is the client saying there is nothing to group by, so the tier
+///   falls through to the next marker and finally to the derived fingerprint —
+///   the same answer a client that states nothing gets.
+/// * **JSON blobs around the id** — Claude Code's `metadata.user_id` is a JSON
+///   string carrying `session_id`, and so is CodeRex's. The blob's other keys
+///   (`turn_id`, `request_id`, `device_id`) are per-request bookkeeping: used
+///   verbatim as the identity they make every request a session of one, which
+///   is the failure this normalization exists to prevent. Only a blob that
+///   actually carries `session_id` is unwrapped; anything else is left as the
+///   client stated it.
+fn stated_session_id(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(blob) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(inner) = blob.get("session_id").and_then(|s| s.as_str()) {
+            return stated_session_id(inner);
+        }
+    }
+    if matches!(
+        raw.to_ascii_lowercase().as_str(),
+        "unknown" | "none" | "null" | "undefined" | "n/a"
+    ) {
+        return None;
+    }
+    Some(raw.to_string())
 }
 
 /// The last tier of [`session_hint`], for a client that states no session
@@ -592,6 +633,60 @@ mod tests {
         );
         // A client that sends neither is exactly where it was before.
         assert_eq!(session_hint(&empty, br#"{"model":"gpt-5.1"}"#), None);
+    }
+
+    #[test]
+    fn session_hint_unwraps_blob_user_id_and_ignores_unknown() {
+        let empty = axum::http::HeaderMap::new();
+
+        // CodeRex's `metadata.user_id` is a JSON blob carrying `session_id`
+        // plus per-request bookkeeping (turn_id, request_id, device_id). The
+        // id is the statement; used verbatim, the blob made every request a
+        // session of one. The blob unwraps to the id it carries.
+        assert_eq!(
+            session_hint(
+                &empty,
+                br#"{"metadata":{"user_id":"{\"device_id\":\"unknown\",\"session_id\":\"e32baae9\",\"turn_id\":\"4\",\"request_id\":\"11ffc6bf\"}"}}"#
+            )
+            .as_deref(),
+            Some("e32baae9")
+        );
+
+        // A blob whose session_id is the "unknown" placeholder states that
+        // there is no session: the tier falls through to the next marker, and
+        // with nothing else stated, to the derived fingerprint — not to a
+        // per-request "session" keyed by the blob's bookkeeping.
+        let with_messages = br#"{"metadata":{"user_id":"{\"device_id\":\"unknown\",\"session_id\":\"unknown\",\"turn_id\":\"4\",\"request_id\":\"11ffc6bf\"}"},"messages":[
+            {"role":"system","content":"you are coderex"},
+            {"role":"user","content":"hello"}
+        ]}"#;
+        let id = session_hint(&empty, with_messages).expect("a derived fallback");
+        assert!(id.starts_with("derived:"), "{id}");
+
+        // A body-level `session_id` that survives the placeholders wins over
+        // the fingerprint, and placeholders among the body tiers fall through
+        // to a real marker in a later tier.
+        assert_eq!(
+            session_hint(&empty, br#"{"session_id":"unknown"}"#).as_deref(),
+            None
+        );
+        assert_eq!(
+            session_hint(
+                &empty,
+                br#"{"metadata":{"user_id":"unknown"},"session_id":"body-9"}"#
+            )
+            .as_deref(),
+            Some("body-9")
+        );
+
+        // The same normalization applies to the header tier: a stated
+        // "unknown" header is not a session, and the body tier gets its turn.
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("x-session-id", "unknown".parse().unwrap());
+        assert_eq!(
+            session_hint(&h, br#"{"session_id":"body-2"}"#).as_deref(),
+            Some("body-2")
+        );
     }
 
     #[test]

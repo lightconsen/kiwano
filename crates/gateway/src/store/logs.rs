@@ -66,6 +66,11 @@ pub struct RequestLogNew {
     /// [`UsageRecord::upstream_key`]. Frozen at write time, and `None` for a
     /// request that never reached a provider.
     pub upstream_key: Option<String>,
+    /// Assistant turns in the conversation this request belongs to, counted
+    /// from the body the client sent (migration v38). `None` when the request
+    /// named no conversation or the capture was off — see
+    /// [`crate::log_capture::count_turns`].
+    pub turns: Option<i64>,
 }
 
 /// Metadata row of `request_logs` (list view — never includes bodies).
@@ -229,10 +234,10 @@ impl Store {
                                        request_size, response_size, truncated,
                                        cost, cost_currency, cost_off_peak,
                                        reasoning_tokens, usage_missing, request_notes,
-                                       upstream_key)
+                                       upstream_key, turns)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                      ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-                     ?28, ?29, ?30, ?31)",
+                     ?28, ?29, ?30, ?31, ?32)",
             params![
                 r.ts,
                 r.method,
@@ -265,6 +270,7 @@ impl Store {
                 r.usage_missing as i64,
                 r.request_notes,
                 r.upstream_key,
+                r.turns,
             ],
         )?;
         let id = tx.last_insert_rowid();

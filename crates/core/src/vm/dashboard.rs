@@ -339,6 +339,7 @@ mod tests {
             cost_off_peak: None,
             request_notes: None,
             upstream_key: None,
+            turns: None,
         };
         s.insert_request_log(&log(200, (1000, 500))).unwrap();
         s.insert_request_log(&log(503, (0, 0))).unwrap();

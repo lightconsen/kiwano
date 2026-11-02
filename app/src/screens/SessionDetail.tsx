@@ -247,7 +247,9 @@ function Body({
           <Row
             label={t("dashboard.sessionTurns")}
             value={
-              row.source === "gateway" ? t("common.none") : String(row.turns)
+              row.source === "imported" || row.turns > 0
+                ? String(row.turns)
+                : t("common.none")
             }
           />
         </Card>

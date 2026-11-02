@@ -29,7 +29,7 @@ use super::views::{
     advanced_vm, billing_to_ui, display_endpoint, endpoint_note, provider_currency, vm_endpoints,
 };
 use crate::store::time::{
-    in_window, local_day_start, local_minutes_now, rfc3339_from_unix, unix_now,
+    day_key, in_window, local_day_start, local_minutes_now, rfc3339_from_unix, unix_now,
 };
 use crate::store::Billing;
 
@@ -135,6 +135,8 @@ pub fn usage_vm(
     p: &Provider,
     totals: Option<&UsageTotals>,
     since7: &str,
+    tz: i64,
+    today_days: i64,
 ) -> Option<UsageVm> {
     let t = totals?;
     // The cost stays in the currency this provider's usage was priced in: it
@@ -180,13 +182,7 @@ pub fn usage_vm(
         _ => None,
     };
     let spark = match quota {
-        None => normalize_spark(
-            &store
-                .provider_daily(&p.id, since7)
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect::<Vec<_>>(),
-        ),
+        None => normalize_spark(&daily_spark(store, &p.id, since7, tz, today_days)),
         Some(_) => None,
     };
     Some(UsageVm {
@@ -201,6 +197,40 @@ pub fn usage_vm(
         quota,
         spark,
     })
+}
+
+/// Seven days of one provider's traffic, **in the order the days happened** —
+/// the series the row's sparkline draws.
+///
+/// The same window the Dashboard's "7d" chart draws (today plus the six local
+/// days before it), bucketed the same way (`usage_daily`, which shifts by the
+/// user's offset before grouping) and zero-filled the same way. That is not
+/// tidiness: the two views sit one click apart and are read against each other.
+/// Before this they disagreed in three ways at once — UTC buckets against local
+/// ones (an eight-hour shift here), a rolling 168 hours against whole calendar
+/// days, and days with no traffic dropped instead of counted as zero, so a line
+/// joining Friday to Sunday hid a silent Saturday.
+fn daily_spark(
+    store: &Store,
+    provider_id: &str,
+    since7: &str,
+    tz: i64,
+    today_days: i64,
+) -> Vec<i64> {
+    let by_day: HashMap<String, i64> = store
+        .usage_daily(None, Some(provider_id), Some(since7), tz)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| (d.day, d.totals.input_tokens + d.totals.output_tokens))
+        .collect();
+    (0..7)
+        .map(|i| {
+            // The local day index is the label: `day_key` takes local seconds,
+            // and a day index times a day is exactly that.
+            let key = day_key((today_days - 6 + i) * 86_400);
+            by_day.get(&key).copied().unwrap_or(0)
+        })
+        .collect()
 }
 
 // ── Sparkline normalization: y coords in the 80×14 viewBox, 1..13 ──
@@ -334,7 +364,13 @@ fn build_rows(store: &Store, live: &[String]) -> Result<Vec<ProviderVm>, ApiErro
     let catalog_entries = catalog_snapshot(store).entries;
 
     let now = unix_now();
-    let since7 = rfc3339_from_unix(now - 7 * 86_400);
+    // The 7-day window both this page and the Dashboard's "Last 7 days" chart
+    // describe: today plus the six local days before it. A rolling 168 hours
+    // would count an extra morning the chart's seven bars cannot show, and the
+    // provider rows are read against that chart.
+    let tz = store.ui_tz_offset_minutes();
+    let today_days = (now + tz * 60).div_euclid(86_400);
+    let since7 = local_day_start(tz, now - 6 * 86_400);
     // The window the prober scopes itself by: a provider with a request in it is
     // one whose latency this build can already show, so the probe skips it and
     // the row shows the traffic number instead. The two must agree, or a row
@@ -355,6 +391,8 @@ fn build_rows(store: &Store, live: &[String]) -> Result<Vec<ProviderVm>, ApiErro
         catalog_entries: &catalog_entries,
         since_day: &since_day,
         since7: &since7,
+        tz,
+        today_days,
         health_by_id: &health_by_id,
         usage_by_id: &usage_by_id,
     };
@@ -603,6 +641,10 @@ struct ProviderViewCtx<'a> {
     catalog_entries: &'a [CatalogEntryVm],
     since_day: &'a str,
     since7: &'a str,
+    /// The user's UTC offset and the local day index today sits on — what the
+    /// sparkline's seven days are counted back from.
+    tz: i64,
+    today_days: i64,
     health_by_id: &'a HashMap<String, crate::store::ProviderHealth>,
     usage_by_id: &'a HashMap<String, UsageTotals>,
 }
@@ -620,7 +662,14 @@ fn provider_vm(ctx: &ProviderViewCtx, p: Provider, badges: BadgeSet) -> Provider
     };
 
     let health = health_vm(ctx.store, &p, ctx.since_day, ctx.health_by_id.get(&p.id));
-    let usage = usage_vm(ctx.store, &p, ctx.usage_by_id.get(&p.id), ctx.since7);
+    let usage = usage_vm(
+        ctx.store,
+        &p,
+        ctx.usage_by_id.get(&p.id),
+        ctx.since7,
+        ctx.tz,
+        ctx.today_days,
+    );
 
     ProviderVm {
         id: p.id.clone(),
@@ -662,5 +711,84 @@ fn provider_vm(ctx: &ProviderViewCtx, p: Provider, badges: BadgeSet) -> Provider
             .plan_query
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::test_support::{sample_provider, temp_store};
+    use crate::store::time::{day_index_of_key, local_day_start_from};
+    use crate::store::{Protocol, UsageRecord};
+
+    /// One metered row, tokens in the input bucket so the sum is the tokens.
+    fn usage(ts: &str, tokens: i64) -> UsageRecord {
+        UsageRecord {
+            ts: ts.to_string(),
+            agent: "claude".into(),
+            provider_id: Some("p-spark".into()),
+            client_key_id: None,
+            model: Some("m".into()),
+            input_tokens: tokens,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: None,
+            status: "ok".into(),
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
+            imported_from: None,
+            upstream_key: None,
+        }
+    }
+
+    /// The row's sparkline and the Dashboard's 7-day chart describe the same
+    /// seven days: local buckets, zero-filled, one point per day. The three
+    /// disagreements this replaced — UTC buckets against local ones, a rolling
+    /// 168 hours against calendar days, and empty days dropped instead of
+    /// counted — each made a line that could not be checked against the chart
+    /// beside it.
+    #[test]
+    fn the_sparkline_is_the_dashboards_seven_local_days() {
+        let (_dir, store) = temp_store();
+        let mut p = sample_provider("p-spark", Protocol::OpenAI);
+        // No cap: that is what asks for a sparkline rather than a quota ring.
+        p.period_limit = None;
+        store.insert_provider(&p).unwrap();
+
+        let tz = 480; // UTC+8
+        let today_days = day_index_of_key("2026-11-02").unwrap();
+        let since7 = local_day_start_from(tz, today_days - 6);
+
+        for row in [
+            // Both fall on local 10-31, but on *different UTC days* — bucketing
+            // by UTC would have split them into two points.
+            usage("2026-10-30T17:00:00+00:00", 100),
+            usage("2026-10-31T15:00:00+00:00", 200),
+            // Local 11-02 00:30, which the UTC calendar calls 11-01.
+            usage("2026-11-01T16:30:00+00:00", 300),
+        ] {
+            store.record_usage(&row).unwrap();
+        }
+
+        // 10-27 … 11-02. 10-31 is the sum of its two rows; 11-01 had no traffic
+        // and is a zero rather than a missing point.
+        assert_eq!(
+            daily_spark(&store, "p-spark", &since7, tz, today_days),
+            vec![0, 0, 0, 0, 300, 0, 300]
+        );
+
+        // And the row actually draws it: a horizontal series of seven samples
+        // is a line, not the "no data" empty state.
+        let totals = store
+            .usage_totals(None, Some("p-spark"), Some(&since7))
+            .unwrap();
+        let vm = usage_vm(&store, &p, Some(&totals), &since7, tz, today_days).unwrap();
+        assert!(vm.quota.is_none());
+        assert_eq!(vm.spark.as_ref().map(Vec::len), Some(7));
     }
 }

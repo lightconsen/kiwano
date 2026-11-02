@@ -19,6 +19,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Apps row's 7-day trend now shows the same days as the Dashboard's.**
+  It was bucketed by UTC date while the Dashboard uses the user's local days, so
+  every point sat eight hours off (a token spent at 01:00 local counted under
+  the previous day); it covered a rolling 168 hours rather than today plus six
+  local days; and days with no traffic were dropped instead of drawn as zero, so
+  a line could join Friday to Sunday and hide a silent Saturday. Both now read
+  one series: seven local days, zero-filled.
+
 ## [0.4.7] - 2026-11-02
 
 **The version where a JWT in a prompt could take the gateway down.** The

@@ -697,28 +697,6 @@ impl Store {
             .ok()?;
         avg.map(|a| a.round() as i64)
     }
-
-    /// Per-UTC-day token totals (input+output) for one provider.
-    pub fn provider_daily(&self, provider_id: &str, since: &str) -> Vec<(String, i64)> {
-        let conn = self.conn.lock().expect("aux mutex poisoned");
-        let mut stmt = match conn.prepare(
-            "SELECT SUBSTR(ts, 1, 10) AS day,
-                    SUM(input_tokens + output_tokens)
-             FROM usage WHERE provider_id = ?1 AND ts >= ?2
-             GROUP BY day ORDER BY day ASC",
-        ) {
-            Ok(s) => s,
-            Err(_) => return Vec::new(),
-        };
-        let map = |r: &rusqlite::Row| -> rusqlite::Result<(String, i64)> {
-            Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0)))
-        };
-        let rows = stmt.query_map(rusqlite::params![provider_id, since], map);
-        match rows {
-            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-            Err(_) => Vec::new(),
-        }
-    }
 }
 
 /// The listing question: which key is still in use, and which has never been.

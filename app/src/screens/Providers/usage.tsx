@@ -417,11 +417,12 @@ function UsageCellBody({ p, plan }: { p: Provider;
           growing a third line on exactly the rows that have the most to show.
 
           "A trend" means two points or more. The backend derives the series and
-          the totals from one 7-day window (`vm::usage_vm` / `Aux::provider_daily`),
-          so any provider with usage at all has a series — and the common case is
-          a *one-element* one, a provider whose traffic all landed on a single
-          day. That draws a single dot, which is not a trend and is less than the
-          numbers it would replace. */}
+          the totals from the same seven local days the Dashboard's "7d" chart
+          draws (`vm::usage_vm` / `daily_spark`), zero-filled, so the two agree
+          on which day a token fell on and on an empty day being a zero. A
+          provider whose traffic all landed on one day still draws a flat line
+          of seven points, and a single-day series is the degenerate case the
+          counts here would replace anyway. */}
       <div className="mt-0.5 flex h-4 items-center text-[10.5px] text-mut">
         {u.spark && u.spark.length > 1 ? (
           <Sparkline points={u.spark} />

@@ -19,7 +19,13 @@ mod tests {
     fn a_spending_limit_shows_up_for_every_billing_that_has_one() {
         let s = store();
         let now = unix_now();
-        let since7 = local_day_start(0, now - 6 * 86_400);
+        // The window the Apps row and the Dashboard's 7-day chart share: today
+        // plus the six local days before it. `tz = 0` here keeps the fixture's
+        // days a fixed offset from `now`, and the sparkline counts them back
+        // from the same local day index.
+        let tz = 0;
+        let today_days = (now + tz * 60).div_euclid(86_400);
+        let since7 = local_day_start(tz, now - 6 * 86_400);
 
         // A metered provider with a 50 CNY cap and 30 CNY of cost this period.
         let mut metered = provider("payg-1", "Payg", Billing::Metered);
@@ -49,7 +55,7 @@ mod tests {
         })
         .unwrap();
         let totals = s.usage_totals(None, Some("payg-1"), Some(&since7)).unwrap();
-        let payg = usage_vm(&s, &metered, Some(&totals), &since7).unwrap();
+        let payg = usage_vm(&s, &metered, Some(&totals), &since7, tz, today_days).unwrap();
         let q = payg.quota.expect("a payg cap is a quota too");
         assert_eq!((q.used, q.limit), (30.0, 50.0));
         assert_eq!(q.unit, "CNY", "denominated in the provider's own currency");
@@ -59,7 +65,7 @@ mod tests {
         unl.period_limit = Some(50.0);
         s.insert_provider(&unl).unwrap();
         let totals = s.usage_totals(None, Some("unl-1"), Some(&since7)).unwrap();
-        let vm = usage_vm(&s, &unl, Some(&totals), &since7).unwrap();
+        let vm = usage_vm(&s, &unl, Some(&totals), &since7, tz, today_days).unwrap();
         assert!(vm.quota.is_none());
 
         // A metered provider with no cap has nothing to ring against, so the
@@ -67,7 +73,7 @@ mod tests {
         let bare = provider("payg-2", "Bare", Billing::Metered);
         s.insert_provider(&bare).unwrap();
         let totals = s.usage_totals(None, Some("payg-2"), Some(&since7)).unwrap();
-        let vm = usage_vm(&s, &bare, Some(&totals), &since7).unwrap();
+        let vm = usage_vm(&s, &bare, Some(&totals), &since7, tz, today_days).unwrap();
         assert!(vm.quota.is_none());
     }
 }

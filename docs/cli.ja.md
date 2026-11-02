@@ -109,6 +109,7 @@ kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
 kiwano providers edit <ID> [any of the above]
 kiwano providers use <ID> --agent AGENT      switch an agent, forcing single strategy
 kiwano providers enable <ID>                 make it the current route, keeping the strategy
+kiwano providers reset-circuit <ID>          close its breaker for every agent routed to it
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers price <ID> --model M --input X --output Y
@@ -159,6 +160,13 @@ Hub が値付けできないモデル名の逃げ道でもあります —— �
 `--plan-limit-*` はプロバイダーがプランでない限り拒否されます（基盤の層が値をおとなしく
 捨ててしまうためですし、何もしないフラグは拒否するフラグより悪いからです）。
 `--plan-query` があって初めて `providers quota` は何かを問い合わせられます。
+
+`providers reset-circuit` は、プロバイダーについて何も変えない唯一のプロバイダー
+コマンドです。ブレーカーは稼働中のデーモンのメモリにあり（4 回連続の失敗で、その
+エージェントへの経路が 1 分間閉じます）、直したばかりのキーやプロキシも、その 1 分が
+過ぎるまでは拒否され続けます。このコマンドはプロバイダーが持つブレーカーをすべて
+閉じ、実際に遮断されていたエージェントを表示します — それは設定の編集では分からない
+部分です。
 
 `--unit` は `--limit` が何を数えるかを示します。`requests`、`wan_tokens`、または Hub が
 レートを公表している通貨です。最後のものは保存されるのではなく検査されます。知らない
@@ -525,6 +533,7 @@ CLI が実際に記録するのは、あるプロバイダーがどのエント�
 | ゲートウェイの状態 + 今日の合計 | `status` |
 | プロバイダーの一覧 / 追加 / 編集 / 削除 | `providers list\|add\|edit\|remove` |
 | プロバイダーをカレントにする | `providers enable`, `providers use` |
+| プロバイダーのサーキットブレーカーをリセット | `providers reset-circuit`、または編集ダイアログの**ブレーカーをリセット** |
 | レイテンシ / エンドポイント / モデルのプローブ | `providers probe …` |
 | プランクォータのリング | `providers quota` |
 | ローテーションする API キー | `keys list\|add\|remove` |

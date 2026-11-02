@@ -439,11 +439,19 @@ impl CircuitBreaker {
         }
     }
 
-    /// Reset the circuit breaker (manual recovery)
-    #[allow(dead_code)]
+    /// Close the breaker by hand, and forget what would re-open it on the next
+    /// look at the provider.
+    ///
+    /// `transition_to_closed` already drops the failure counters, the auth
+    /// counter and the rate-limit window. What it does not touch is the 401
+    /// body kept for replay — and that is the one that matters here: a manual
+    /// reset is most often the user having just replaced the key, and a body
+    /// captured from the old one would be handed back to a client as "invalid
+    /// key" long after the key changed.
     pub async fn reset(&self) {
         tracing::info!("circuit breaker: manual reset → closed");
         self.transition_to_closed().await;
+        *self.auth_rejection_body.write().await = None;
     }
 
     fn allow_half_open_probe(&self) -> AllowResult {

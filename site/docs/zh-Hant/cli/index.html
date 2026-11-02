@@ -302,6 +302,7 @@ kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
 kiwano providers edit &lt;ID&gt; [any of the above]
 kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing single strategy
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
+kiwano providers reset-circuit &lt;ID&gt;          close its breaker for every agent routed to it
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
 kiwano providers price &lt;ID&gt; --model M --input X --output Y
@@ -338,6 +339,10 @@ kiwano providers probe latency|endpoint|models
 <p>除非供應商是方案,否則 <code>--plan-limit-*</code> 會被拒絕(否則底層會默默丟掉這個
 值,而一個什麼都不做的旗標比一個會拒絕的旗標更糟)。<code>--plan-query</code> 才是
 <code>providers quota</code> 問得出任何東西的前提。</p>
+<p><code>providers reset-circuit</code> 是唯一一個不改動供應商任何東西的供應商命令。熔斷器活在
+執行中的守護程式記憶體裡(連續失敗四次,就把發給該 Agent 的路由關上一分鐘),所以你
+剛換好的 Key 或修好的代理,在這一分鐘過去之前仍然會被拒絕。這條命令會關掉該供應商
+所有的熔斷器,並列出確實被擋住的 Agent——這一點任何設定編輯都告訴不了你。</p>
 <p><code>--unit</code> 說明 <code>--limit</code> 計算的是什麼:<code>requests</code>、<code>wan_tokens</code>,或 Hub 有
 公布匯率的貨幣。最後一種是檢查而非儲存,不認得時會以結束碼 2 結束,並附上
 它認得的貨幣:限額是拿來與以其他貨幣計價的成本相比,沒有匯率的限額會被
@@ -603,6 +608,10 @@ kiwano providers add --name DeepSeek --endpoint https://api.deepseek.com/anthrop
 <tr>
 <td>把供應商設為當前</td>
 <td><code>providers enable</code>, <code>providers use</code></td>
+</tr>
+<tr>
+<td>重置供應商的熔斷器</td>
+<td><code>providers reset-circuit</code>,或編輯對話框裡的<strong>重置熔斷</strong></td>
 </tr>
 <tr>
 <td>延遲 / 端點 / 模型探測</td>

@@ -73,6 +73,15 @@ pub fn update_provider(
 }
 
 #[tauri::command(async)]
+pub fn reset_provider_circuit(id: String) -> Result<vm::ResetCircuitVm, String> {
+    // Served by the daemon, and it has to be: the breakers are that process's
+    // memory, so a client that opened the store itself would be resetting
+    // nothing. Nothing is re-read afterwards — the route table did not change,
+    // only what the breakers will admit to it.
+    kiwano_core::daemon_api::DaemonApi::connect().reset_provider_circuit(&id)
+}
+
+#[tauri::command(async)]
 pub fn delete_provider(id: String) -> Result<bool, String> {
     // Served by the daemon: the promotion of a replacement primary is part of
     // the same operation, and it is the daemon that re-reads its route table.

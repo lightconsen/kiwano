@@ -19,7 +19,7 @@ use kiwano_api::client_keys::{
 use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm, UsageAlertVm};
 use kiwano_api::keys::{ApiKeyVm, UpstreamKeySpendVm};
 use kiwano_api::providers::{
-    NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, SyncReportVm,
+    NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, ResetCircuitVm, SyncReportVm,
 };
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwano_api::sessions::{SessionListVm, SessionVm};
@@ -523,6 +523,22 @@ impl DaemonApi {
             &format!("/api/providers/{id}/enabled"),
             &Body { enabled },
         ))
+    }
+
+    /// Close a provider's breakers by hand — one per agent that routes to it.
+    ///
+    /// The breaker lives in the daemon's memory, fed by real traffic, so this is
+    /// the only way to recover a provider whose circuit is still open after the
+    /// problem behind it is gone. The answer is the agents that *were* being
+    /// held back: an empty list means the call was a no-op, which is worth
+    /// saying rather than reporting as a silent success.
+    pub fn reset_provider_circuit(&self, id: &str) -> Result<ResetCircuitVm, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{id}/reset-circuit"),
+            &serde_json::Value::Null,
+        )
     }
 
     /// Delete a provider — `vm::delete_provider`. `false` when there was no such

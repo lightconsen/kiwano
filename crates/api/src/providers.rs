@@ -434,6 +434,20 @@ pub struct ProviderRefVm {
     pub billing: String,
 }
 
+/// What a manual circuit reset did — the daemon's answer to the edit dialog's
+/// "reset breaker" button.
+///
+/// `blocked_agents` is the point of the shape: the button's success is only
+/// interesting when something was actually being held back, and "which agents"
+/// is the fact the user can act on. An empty list is a real answer — the
+/// circuits were already closed — rather than a failure.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ResetCircuitVm {
+    /// The agents whose breakers were open and are now closed, sorted.
+    #[serde(default)]
+    pub blocked_agents: Vec<String>,
+}
+
 /// Deserialize a field that is present as `Some`, whatever it holds — `null`
 /// included.
 ///

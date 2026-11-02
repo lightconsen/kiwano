@@ -26,6 +26,7 @@ const { apiMock } = vi.hoisted(() => ({
     updateProvider: vi.fn(),
     testEndpoint: vi.fn(),
     listModels: vi.fn(),
+    resetProviderCircuit: vi.fn(),
   },
 }));
 
@@ -530,6 +531,7 @@ describe("adding a provider from the catalog", () => {
     const payload = await savedPayload(user);
     expect(payload.endpoint).toBe("https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1");
   });
+});
 
 describe("the binding list", () => {
   /** A takeover row, as the settings read returns it. */
@@ -569,4 +571,85 @@ describe("the binding list", () => {
   });
 });
 
+describe("resetting the circuit breaker from the edit dialog", () => {
+  /** The provider being edited; the breaker lives in the daemon, not the row. */
+  const editing = {
+    id: "manual-1a2b3c",
+    name: "Manual",
+    logo_char: "M",
+    logo_color: "#555555",
+    endpoint: "api.example.com",
+    protocol: "openai" as const,
+    endpoint_note: "OpenAI-compatible",
+    billing: "payg" as const,
+    limit_unit: "USD",
+    currency: "USD",
+    prices: null,
+    enabled: true,
+    agents: [],
+    serving_agents: [],
+    is_current: false,
+    health: { state: "idle" as const, latency_ms: null },
+    usage: null,
+  };
+
+  async function openEdit() {
+    const user = userEvent.setup();
+    render(
+      <AddProviderModal
+        open
+        preset={null}
+        edit={editing}
+        preferredCurrency="USD"
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+    await openAdvanced(user);
+    return user;
+  }
+
+  it("closes the breaker and names the agents that may send again", async () => {
+    apiMock.resetProviderCircuit.mockResolvedValue({ blocked_agents: ["claude", "codex"] });
+    const user = await openEdit();
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.resetCircuitAction }));
+    await waitFor(() => expect(apiMock.resetProviderCircuit).toHaveBeenCalledWith(editing.id));
+
+    // The answer names the agents by their labels rather than by slug — the
+    // user picked them on this screen, and "claude" is not what they read there.
+    expect(
+      await screen.findByText(
+        en.addProvider.resetCircuitDone.replace("{agents}", "Claude Code, Codex"),
+      ),
+    ).toBeInTheDocument();
+    // It is a one-shot action, not a field: nothing about the provider was saved.
+    expect(apiMock.updateProvider).not.toHaveBeenCalled();
+  });
+
+  it("says so when nothing was open, rather than reporting a silent success", async () => {
+    apiMock.resetProviderCircuit.mockResolvedValue({ blocked_agents: [] });
+    const user = await openEdit();
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.resetCircuitAction }));
+    expect(await screen.findByText(en.addProvider.resetCircuitNone)).toBeInTheDocument();
+  });
+
+  it("shows a failed reset as a failure, not as nothing to do", async () => {
+    apiMock.resetProviderCircuit.mockRejectedValue(new Error("daemon is not running"));
+    const user = await openEdit();
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.resetCircuitAction }));
+    expect(
+      await screen.findByText(
+        en.addProvider.resetCircuitFailed.replace("{detail}", "Error: daemon is not running"),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("is not offered for a provider that does not exist yet", async () => {
+    const user = await openCustom();
+    await openAdvanced(user);
+    expect(screen.queryByRole("button", { name: en.addProvider.resetCircuitAction })).toBeNull();
+  });
 });

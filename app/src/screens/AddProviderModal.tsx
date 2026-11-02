@@ -20,7 +20,7 @@ import {
   type Provider,
   type UpstreamKeySpendEntry,
 } from "../api/types";
-import { rememberCustomAgents } from "../lib/agents";
+import { agentMeta, rememberCustomAgents } from "../lib/agents";
 import { useHubUrl } from "../lib/hub";
 import {
   hasUnfilledParams,
@@ -174,6 +174,11 @@ export default function AddProviderModal({
   // default transport, which is what every provider that is reachable directly
   // wants — a proxy that goes down should not take a direct route with it.
   const [advProxy, setAdvProxy] = useState("");
+  // The manual circuit reset — an action, not a field: it talks to the gateway's
+  // in-memory breakers and writes nothing to the row, so it is deliberately not
+  // part of the save. `resetNote` holds the daemon's answer, already worded.
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetNote, setResetNote] = useState<{ text: string; error: boolean } | null>(null);
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
   // Plan-mode percent limits: per-window utilization ceilings over the
@@ -247,6 +252,8 @@ export default function AddProviderModal({
     setAdvRetries("");
     setAdvHeaders([]);
     setAdvProxy("");
+    setResetNote(null);
+    setResetBusy(false);
   };
 
   // Fetch the live model-name list from the primary endpoint. Requires the
@@ -342,6 +349,10 @@ export default function AddProviderModal({
     setNewKey("");
     setNewKeyLabel("");
     setQuery("");
+    // The reset's answer belongs to the dialog's last opening, not this one: an
+    // "N agents may send again" left on screen would read as this open's news.
+    setResetNote(null);
+    setResetBusy(false);
     if (edit) {
       setMode("custom");
       setShelf(null);
@@ -652,6 +663,39 @@ export default function AddProviderModal({
       if (edit) refreshKeySpend(edit.id);
     } finally {
       setKeyBusy(false);
+    }
+  };
+
+  /** Close this provider's breakers by hand.
+   *
+   * Deliberately separate from the save: the breaker is the gateway's memory and
+   * nothing about the row changes, so a user who resets and then dismisses the
+   * dialog has still reset it. That is also why the answer is worded here rather
+   * than left to a refetch — the count of agents that were held back is a fact
+   * only this call knows, and it is gone from the UI the moment the dialog
+   * closes. */
+  const resetCircuit = async () => {
+    if (!edit || resetBusy) return;
+    setResetBusy(true);
+    setResetNote(null);
+    try {
+      const r = await api.resetProviderCircuit(edit.id);
+      setResetNote({
+        text:
+          r.blocked_agents.length === 0
+            ? t("addProvider.resetCircuitNone")
+            : t("addProvider.resetCircuitDone", {
+                agents: r.blocked_agents.map((a) => agentMeta(a).label).join(", "),
+              }),
+        error: false,
+      });
+    } catch (e) {
+      setResetNote({
+        text: t("addProvider.resetCircuitFailed", { detail: String(e) }),
+        error: true,
+      });
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -975,6 +1019,13 @@ export default function AddProviderModal({
               advProxy={advProxy}
               setAdvProxy={setAdvProxy}
               setAdvHeaders={setAdvHeaders}
+              // An edit only: a provider that does not exist has nothing in the
+              // gateway's breaker table, and a reset of it would be a no-op the
+              // button could not honestly report.
+              resetCircuit={!!edit}
+              resetBusy={resetBusy}
+              resetNote={resetNote}
+              onResetCircuit={resetCircuit}
             />
           </div>
         </div>

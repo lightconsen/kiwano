@@ -307,6 +307,7 @@ kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
 kiwano providers edit &lt;ID&gt; [any of the above]
 kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing single strategy
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
+kiwano providers reset-circuit &lt;ID&gt;          close its breaker for every agent routed to it
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
 kiwano providers price &lt;ID&gt; --model M --input X --output Y
@@ -345,6 +346,12 @@ kiwano providers probe latency|endpoint|models
 <p><code>--plan-limit-*</code> はプロバイダーがプランでない限り拒否されます（基盤の層が値をおとなしく
 捨ててしまうためですし、何もしないフラグは拒否するフラグより悪いからです）。
 <code>--plan-query</code> があって初めて <code>providers quota</code> は何かを問い合わせられます。</p>
+<p><code>providers reset-circuit</code> は、プロバイダーについて何も変えない唯一のプロバイダー
+コマンドです。ブレーカーは稼働中のデーモンのメモリにあり（4 回連続の失敗で、その
+エージェントへの経路が 1 分間閉じます）、直したばかりのキーやプロキシも、その 1 分が
+過ぎるまでは拒否され続けます。このコマンドはプロバイダーが持つブレーカーをすべて
+閉じ、実際に遮断されていたエージェントを表示します — それは設定の編集では分からない
+部分です。</p>
 <p><code>--unit</code> は <code>--limit</code> が何を数えるかを示します。<code>requests</code>、<code>wan_tokens</code>、または Hub が
 レートを公表している通貨です。最後のものは保存されるのではなく検査されます。知らない
 通貨を渡すと、知っている通貨を挙げて終了コード 2 で終わります。上限は他の通貨で
@@ -653,6 +660,10 @@ CLI が意図的に持たない便宜であって、欠いている機能では�
 <tr>
 <td>プロバイダーをカレントにする</td>
 <td><code>providers enable</code>, <code>providers use</code></td>
+</tr>
+<tr>
+<td>プロバイダーのサーキットブレーカーをリセット</td>
+<td><code>providers reset-circuit</code>、または編集ダイアログの<strong>ブレーカーをリセット</strong></td>
 </tr>
 <tr>
 <td>レイテンシ / エンドポイント / モデルのプローブ</td>

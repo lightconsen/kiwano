@@ -53,6 +53,53 @@ impl StrategyEngine {
         b
     }
 
+    /// Close every breaker this provider has — one per agent that routes to it
+    /// — and answer which of them were holding traffic back.
+    ///
+    /// The manual recovery, offered where a provider is edited: a vendor that
+    /// was unreachable for an afternoon, or a key the user has just replaced,
+    /// leaves breakers open for their timeout that no request will close. Waiting
+    /// is the only other way out, and the wait is invisible from the UI.
+    ///
+    /// Breakers that are already closed are reset too — not because they are
+    /// blocking anything, but so "reset" means one thing rather than "reset only
+    /// if it happens to be open". The answer is still the agents that *were*
+    /// blocked, because that is the sentence the user can act on: a provider
+    /// whose circuits were all closed is one where the button did nothing, and
+    /// saying so is better than reporting a silent success.
+    ///
+    /// A provider no request has reached has no breakers; nothing is created
+    /// here, so the answer for it is an empty list.
+    pub async fn reset_breakers(&self, provider_id: &str) -> Vec<String> {
+        // Clone the handles out and drop the registry lock before awaiting: the
+        // breakers have their own locks, and a std guard must not cross an await.
+        let mine: Vec<(String, Arc<CircuitBreaker>)> = self
+            .breakers
+            .lock()
+            .expect("breaker registry poisoned")
+            .iter()
+            .filter(|(key, _)| {
+                // `agent:provider_id`, and an agent id is a slug — no colons, so
+                // the split is unambiguous.
+                key.rsplit_once(':').is_some_and(|(_, p)| p == provider_id)
+            })
+            .map(|(k, b)| (k.clone(), b.clone()))
+            .collect();
+
+        let mut blocked = Vec::new();
+        for (key, breaker) in mine {
+            let state = breaker.get_state().await;
+            breaker.reset().await;
+            // Closed is the only state in which nothing is being held back.
+            if state != circuit_breaker::CircuitState::Closed {
+                let agent = key.rsplit_once(':').map(|(a, _)| a.to_string());
+                blocked.push(agent.unwrap_or(key));
+            }
+        }
+        blocked.sort();
+        blocked
+    }
+
     pub(crate) async fn candidate_available(&self, route: &AgentRoute, idx: usize) -> bool {
         let c = &route.candidates[idx];
         self.breaker(&route.agent, &c.id).await.is_available().await
@@ -256,5 +303,99 @@ mod tests {
         let stats = engine.breaker("claude", "a").await.get_stats().await;
         assert_eq!(stats.total_requests, 0, "an admission is not a request");
         assert_eq!(stats.consecutive_failures, 0);
+    }
+
+    // A manual reset is per **provider**, and one provider's breakers are one
+    // per agent that routes to it. Closing only the first would leave the route
+    // blocked exactly where the user was looking at it from.
+    #[tokio::test]
+    async fn a_manual_reset_closes_every_breaker_that_provider_holds() {
+        let engine = StrategyEngine::new();
+        for agent in ["claude", "codex"] {
+            seed_breaker(&engine, agent, "p-1");
+            for _ in 0..4 {
+                engine
+                    .record(
+                        agent,
+                        "p-1",
+                        crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                        false,
+                    )
+                    .await;
+            }
+        }
+        // Another provider's breaker, which the reset must not touch: it belongs
+        // to a different row, and a vendor that is still down is still down.
+        seed_breaker(&engine, "claude", "p-2");
+        for _ in 0..4 {
+            engine
+                .record(
+                    "claude",
+                    "p-2",
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
+        }
+
+        let mut blocked = engine.reset_breakers("p-1").await;
+        blocked.sort();
+        assert_eq!(blocked, vec!["claude", "codex"], "the agents it unblocked");
+
+        for agent in ["claude", "codex"] {
+            assert!(
+                engine.allow(agent, "p-1").await.allowed,
+                "{agent} may send again"
+            );
+        }
+        // Asserted on the state rather than through `allow`: these test breakers
+        // have a zero-second timeout, so an open one would answer "allowed" as a
+        // recovery probe — which is exactly the confusion the reset exists to
+        // spare a user. Another provider's breaker is still Open, so the button
+        // closed only what it was pointed at.
+        assert_eq!(
+            engine.breaker("claude", "p-2").await.get_state().await,
+            circuit_breaker::CircuitState::Open,
+            "another provider's open breaker is not this button's to close"
+        );
+
+        // Nothing was open the second time, so the answer is empty rather than a
+        // success that claims to have unblocked something.
+        assert!(engine.reset_breakers("p-1").await.is_empty());
+        // And a provider nothing has reached has no breakers to report on.
+        assert!(engine.reset_breakers("never-seen").await.is_empty());
+    }
+
+    // A breaker opened by a refused key holds that key's 401 body for replay.
+    // After a reset the key may well be a different one, so the body must go
+    // with the counter — otherwise the next client is told "invalid key" about
+    // a credential that has never been tried.
+    #[tokio::test]
+    async fn a_manual_reset_forgets_the_key_that_was_refused() {
+        let engine = StrategyEngine::new();
+        for _ in 0..2 {
+            engine
+                .record(
+                    "claude",
+                    "a",
+                    crate::strategy::circuit_breaker::AttemptOutcome::AuthRejected,
+                    false,
+                )
+                .await;
+        }
+        engine
+            .note_auth_rejection_body("claude", "a", r#"{"error":"invalid key"}"#.into())
+            .await;
+        assert!(
+            engine.auth_rejection_body("claude", "a").await.is_some(),
+            "while open on auth, the refusal is what gets replayed"
+        );
+
+        engine.reset_breakers("a").await;
+        assert_eq!(
+            engine.auth_rejection_body("claude", "a").await,
+            None,
+            "a body from the old key outlives the key otherwise"
+        );
     }
 }

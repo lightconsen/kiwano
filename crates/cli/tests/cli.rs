@@ -936,6 +936,44 @@ fn providers_quota_reports_a_missing_plan_query() {
     assert!(out.is_empty(), "no payload on stdout for a failure: {out}");
 }
 
+/// Resetting a breaker that was never tripped says so instead of claiming to
+/// have unblocked something — and the row is untouched, since the breaker is
+/// the daemon's memory.
+#[test]
+fn providers_reset_circuit_reports_nothing_was_open() {
+    let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let home = dir.path().join("home");
+    let home_arg = home.display().to_string();
+    let id = add_provider(&db, "alpha", &["claude"]);
+
+    let (code, out, err) = run_served(&db, &daemon, &["providers", "reset-circuit", &id]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("no circuit was open"), "{out}");
+    assert!(out.contains("alpha"), "{out}");
+
+    // `--json` carries the same answer in the shape a script can read.
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "providers", "reset-circuit", &id]);
+    assert_eq!(code, 0, "{err}");
+    let payload: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(payload["provider_id"], id);
+    assert_eq!(payload["blocked_agents"], serde_json::json!([]));
+
+    // Nothing about the provider changed: the reset is not an edit.
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "providers", "list"],
+    );
+    let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(list[0]["name"], "alpha");
+
+    // A typo is an error about the wrong subject, not a cheerful empty answer.
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "reset-circuit", "ghost"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("not found"), "{err}");
+}
+
 /// Parking a provider, and putting it back: the row, its key and its route all
 /// survive, and only whether it may serve changes.
 #[test]

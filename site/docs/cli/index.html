@@ -308,6 +308,7 @@ kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
 kiwano providers edit &lt;ID&gt; [any of the above]
 kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing single strategy
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
+kiwano providers reset-circuit &lt;ID&gt;          close its breaker for every agent routed to it
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
 kiwano providers price &lt;ID&gt; --model M --input X --output Y
@@ -379,6 +380,12 @@ key, it does not blank it.</p>
 silently drops the value otherwise, and a flag that does nothing is worse than
 one that refuses). <code>--plan-query</code> is what makes <code>providers quota</code> able to ask
 anything at all.</p>
+<p><code>providers reset-circuit</code> is the one provider command that changes nothing
+about the provider. The breaker is the running daemon&#39;s memory — four
+consecutive failures close a provider to an agent for a minute — so a key or a
+proxy you have just fixed is still refused until that minute runs out. This
+closes every breaker the provider has and prints the agents that were actually
+being held back, which is the part no config edit could tell you.</p>
 <p><code>--unit</code> says what a <code>--limit</code> counts: <code>requests</code>, <code>wan_tokens</code>, or a currency the
 Hub publishes a rate for. That last one is checked rather than stored, and exits 2
 with the currencies it does know: a limit is measured against costs priced in other
@@ -703,6 +710,10 @@ self-update).</p>
 <tr>
 <td>Make a provider current</td>
 <td><code>providers enable</code>, <code>providers use</code></td>
+</tr>
+<tr>
+<td>Reset a provider&#39;s circuit breaker</td>
+<td><code>providers reset-circuit</code>, or <strong>Reset breaker</strong> in its edit dialog</td>
 </tr>
 <tr>
 <td>Latency / endpoint / model probes</td>

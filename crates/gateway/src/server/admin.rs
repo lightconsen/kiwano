@@ -153,6 +153,13 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
                 .delete(delete_provider_route),
         )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
+        // The breaker state is memory, not a tier: it belongs to the running
+        // daemon, which is why this is a `POST` on a provider route rather than
+        // anything the store could serve.
+        .route(
+            "/providers/{id}/reset-circuit",
+            post(reset_provider_circuit_route),
+        )
         .route("/usage-alerts", get(usage_alerts_route))
         .route("/dashboard", get(dashboard_route))
         .route("/usage", get(usage_route))
@@ -1037,6 +1044,46 @@ async fn set_provider_enabled_route(
 ) -> Response {
     let result = crate::api::providers::set_provider_enabled(&state.store, &id, body.enabled);
     after_write(&state, result)
+}
+
+/// `POST /api/providers/{id}/reset-circuit` — close the provider's breakers by
+/// hand, one per agent that routes to it, and say which agents were being held
+/// back.
+///
+/// The circuit breaker is the one piece of routing state that is **not** in the
+/// database: it is fed by real traffic and lives in the daemon's memory. So the
+/// fix for "a provider recovered but is still being skipped" cannot be an edit
+/// to a row — it is a call into the process holding the breakers, which is why
+/// this endpoint exists at all.
+///
+/// `reset` even when nothing is open. The button means "start this provider
+/// clean"; reporting success only in the case where something *was* blocked
+/// would make the user wonder whether the click landed. `blocked_agents` is what
+/// turns that success into an answer — empty when there was nothing to unblock.
+async fn reset_provider_circuit_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    // A provider that does not exist is a 404 rather than a silent success: the
+    // breakers are keyed by `agent:provider_id` with no foreign key behind them,
+    // so a typo would otherwise answer "nothing was blocked" — a true sentence
+    // about the wrong subject.
+    match state.store.get_provider(&id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return resource_error(kiwano_api::error::ApiError::not_found(format!(
+                "provider not found: {id}"
+            )))
+        }
+        Err(e) => return resource_error(kiwano_api::error::ApiError::failed(e)),
+    }
+    let blocked_agents = state.engine.reset_breakers(&id).await;
+    tracing::info!(
+        provider = %id,
+        agents = ?blocked_agents,
+        "provider circuits reset by hand"
+    );
+    Json(json!({ "ok": true, "blocked_agents": blocked_agents })).into_response()
 }
 
 /// `DELETE /api/providers/{id}` — delete a provider, promoting the next
@@ -2375,6 +2422,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The reset is the one provider route that changes no row: the breakers are
+    /// the daemon's memory, so the write it makes is to a map. Asserted through
+    /// the endpoint because that is where the pairing of "close them all" with
+    /// "say which were closed" lives.
+    #[tokio::test]
+    async fn resetting_a_provider_circuit_unblocks_and_names_the_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        // Open it the way traffic does: four failures on the provider's breaker.
+        for _ in 0..4 {
+            state
+                .engine
+                .record(
+                    "claude",
+                    "p-ant",
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
+        }
+        assert!(!state.engine.allow("claude", "p-ant").await.allowed);
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "POST",
+                "/api/providers/p-ant/reset-circuit",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["blocked_agents"], json!(["claude"]));
+        assert!(
+            state.engine.allow("claude", "p-ant").await.allowed,
+            "the breaker admits traffic again"
+        );
+
+        // A second call is a success with nothing to report — the button's
+        // "landed" answer, not a claim to have unblocked something.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "POST",
+                "/api/providers/p-ant/reset-circuit",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(body_json(response).await["blocked_agents"], json!([]));
+
+        // A provider that does not exist is a 404: the breakers are keyed with no
+        // foreign key behind them, so a typo would otherwise answer "nothing was
+        // blocked" — true, about the wrong subject.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "POST",
+                "/api/providers/p-ghost/reset-circuit",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     /// The write endpoints are behind the token too — the resource routes are

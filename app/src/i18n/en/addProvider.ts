@@ -153,6 +153,18 @@ export const addProvider = {
   removeHeader: "Remove header",
   addHeader: "Add header",
 
+  // ── Manual circuit reset (edit only) ──
+  resetCircuit: "Circuit breaker",
+  resetCircuitAction: "Reset breaker",
+  resetCircuitBusy: "Resetting…",
+  resetCircuitHint:
+    "Closes it for every agent routed here, so traffic goes through now instead of waiting out the timeout. Changes nothing about the provider itself.",
+  /** Nothing was open — a real answer, and worth saying rather than leaving the
+      click looking inert. */
+  resetCircuitNone: "Nothing was blocked — every circuit was already closed.",
+  resetCircuitDone: "Closed — {agents} may send again.",
+  resetCircuitFailed: "Could not reset: {detail}",
+
   // ── Footer ──
   saving: "Saving…",
   saveEnable: "Save & enable",

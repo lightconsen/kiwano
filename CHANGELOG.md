@@ -19,6 +19,19 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A provider's circuit breaker can be reset by hand.** Four consecutive
+  failures close a provider to an agent for a minute, and neither a replaced key
+  nor a fixed proxy clears that: the breaker has no idea anything changed, and
+  the timeout is the only way out — invisible from the UI. **Reset breaker** in
+  the provider dialog's Advanced section, or `kiwano providers reset-circuit
+  <ID>`, closes every breaker the provider holds and names the agents that were
+  actually being held back. It changes nothing about the provider, so it is not
+  part of the save: it takes effect immediately. A reset also forgets the 401
+  body kept for replay, so a key you just swapped is not still reported as
+  invalid.
+
 ## [0.4.5] - 2026-11-01
 
 **The version where a provider has a page of its own.** The Apps list is an

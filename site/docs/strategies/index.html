@@ -295,6 +295,21 @@ served it?</strong> The values are the same attribution the request is metered w
 so what the header says is what the ledger records. A request the gateway
 itself refused — a spend ceiling, a client key&#39;s policy — carries no receipt:
 nothing served it.</p>
+<h2 id="when-a-provider-takes-itself-out-the-breaker">When a provider takes itself out: the breaker</h2>
+<p>Each provider gets a <strong>circuit breaker per agent</strong>: after four consecutive
+failures (or a 60% error rate over ten requests) it opens and that agent stops
+being sent there, until a 60-second timeout lets one probe through. Two
+consecutive auth rejections open it the same way, and while it is open the
+gateway replays the upstream&#39;s own 401 instead of spending a request on a key
+known to be refused.</p>
+<p>The breaker lives in the running daemon&#39;s memory, not in the provider&#39;s row —
+which is why recovery is a button rather than an edit. Fixing a bad key or a
+broken proxy does not clear it: the breaker has no idea anything changed, and
+the timeout is the only thing that would close it. <strong>Reset breaker</strong> in that
+provider&#39;s Advanced section, or <code>kiwano providers reset-circuit &lt;ID&gt;</code>, closes it
+for every agent routed there and names the ones that were actually being held
+back. Nothing about the provider&#39;s configuration changes, so it is not part of
+the save: it takes effect the moment you press it.</p>
 <h2 id="spend-ceilings-agent-limits">Spend ceilings (agent limits)</h2>
 <p>An agent can carry ceilings per period — <code>day</code>, <code>weekly</code>, <code>monthly</code>,
 <code>yearly</code> or <code>all</code> — each with a limit and a unit: request counts

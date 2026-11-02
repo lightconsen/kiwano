@@ -19,6 +19,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-02
+
+**The version where a JWT in a prompt could take the gateway down.** The
+credential scrubber that runs before a request body is stored found a JWT's
+first segment, then found the payload inside it as a second match — and
+rewrote the two in an order that sliced a range backwards. The daemon panicked
+on the log path, the admin plane went with it, and the app could only report
+that it could not read the screen. Fixed, with the overlap merged into the one
+credential it always was.
+
 ## [0.4.6] - 2026-11-02
 
 **The version where a gateway-only session still says how long it was.**

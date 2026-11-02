@@ -31,15 +31,17 @@ use kiwano_adapters::proxy::providers::transform::{
 
 use crate::error::GatewayError;
 use crate::forward::convert::proxy_error_into_response;
-use crate::forward::finish::{buffered_response, finish_log, log_failure, sse_response};
+use crate::forward::finish::{
+    buffered_response, finish_log, log_failure, log_failure_with_upstream, sse_response,
+};
 use crate::forward::headers::{
     copy_response_headers, response_headers_text, upstream_key_and_headers,
 };
 use crate::forward::sample::{attribution_str, CompletedLog, UsageSample};
 use crate::forward::stream::StreamPolicy;
-use crate::forward::upstream::{read_body_or_response, send_upstream};
+use crate::forward::upstream::{read_body_or_response, send_upstream, upstream_json};
 use crate::forward::BoxError;
-use crate::meter::{parse_response_usage, request_model, Usage};
+use crate::meter::{parse_response_usage, parse_usage_value, request_model, Usage};
 use crate::router::RoutedRequest;
 use crate::server::data::upstream_url;
 use crate::server::{error_into_response, error_response, GatewayState};
@@ -261,7 +263,17 @@ pub(crate) async fn forward_responses_via_chat(
             Err(resp) => return resp,
         };
         let latency_ms = started.elapsed().as_millis() as i64;
-        let (usage, upstream_model) = parse_response_usage(Protocol::OpenAI, &bytes);
+        // Parsed once and used twice: the conversion needs the document, and the
+        // meter needs its usage. A body the gateway had to assemble from an
+        // event stream never existed as JSON bytes, so the byte reading cannot
+        // see it — the assembled document is read instead.
+        let parsed = upstream_json(&bytes, status, Protocol::OpenAI);
+        let (mut usage, mut upstream_model) = parse_response_usage(Protocol::OpenAI, &bytes);
+        if let Ok(v) = &parsed {
+            let (u, m) = parse_usage_value(Protocol::OpenAI, v.clone());
+            usage = usage.or(u);
+            upstream_model = upstream_model.or(m);
+        }
 
         if !status.is_success() {
             // An upstream error is the vendor's own shape (`{"error": {...}}`),
@@ -287,17 +299,15 @@ pub(crate) async fn forward_responses_via_chat(
             return buffered_response(&state, bytes, sample, status, response_headers);
         }
 
-        let responses = match serde_json::from_slice::<serde_json::Value>(&bytes)
-            .map_err(|e| GatewayError::Upstream(format!("upstream body is not JSON: {e}")))
-            .and_then(|v| {
-                chat_to_responses(v)
-                    .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
-            }) {
+        let responses = match parsed.and_then(|v| {
+            chat_to_responses(v)
+                .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
+        }) {
             Ok(v) => v,
             Err(e) => {
                 let message = e.to_string();
                 let resp = error_into_response(e, inbound);
-                log_failure(
+                log_failure_with_upstream(
                     &state,
                     log.as_ref(),
                     provider,
@@ -305,6 +315,8 @@ pub(crate) async fn forward_responses_via_chat(
                     resp.status(),
                     "conversion_failed",
                     message,
+                    &bytes,
+                    Some(&response_headers),
                 );
                 return resp;
             }

@@ -206,6 +206,69 @@ pub(crate) async fn read_body_or_response(
     }
 }
 
+/// The JSON document a conversion leg's buffered upstream response should have
+/// been — or the reason it was not.
+///
+/// A conversion leg buffers a non-SSE response and hands the bytes to the
+/// converter, which is written against a JSON document. Three other shapes
+/// reach here in practice:
+///
+/// - **An empty body with a success status.** A provider that broke mid-answer
+///   returns `200` and nothing else. Calling that "not JSON: expected value at
+///   line 1 column 1" sends the reader looking for a serialization problem in
+///   the gateway; it is an upstream failure and is named as one.
+/// - **An event stream the provider sent anyway.** Some resellers implement only
+///   the streaming path and ignore `stream: false` — and some of those label it
+///   `application/json`, which is why the test is on the bytes. An OpenAI-shaped
+///   stream is assembled into the completion it described, so the client gets
+///   its answer instead of a 502; an Anthropic-shaped one is reported, because
+///   assembling that event stream is a different job and pretending otherwise
+///   would hand the converter the wrong shape.
+/// - **Anything else.** Reported with the first bytes of what actually arrived,
+///   because "not JSON" alone has never been enough to tell an HTML error page
+///   from a truncated write.
+pub(crate) fn upstream_json(
+    bytes: &[u8],
+    status: StatusCode,
+    upstream_protocol: Protocol,
+) -> Result<serde_json::Value, GatewayError> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Err(GatewayError::Upstream(format!(
+            "upstream answered {} with an empty body",
+            status.as_u16()
+        )));
+    }
+    let parse_error = match serde_json::from_slice::<serde_json::Value>(bytes) {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    if kiwano_adapters::proxy::providers::assemble::looks_like_sse(bytes) {
+        if upstream_protocol == Protocol::OpenAI {
+            if let Some(v) = kiwano_adapters::proxy::providers::assemble::assemble_chat_sse(bytes) {
+                tracing::warn!(
+                    "upstream ignored stream=false and answered with an event stream; assembled it into one completion"
+                );
+                return Ok(v);
+            }
+        }
+        return Err(GatewayError::Upstream(
+            "upstream answered a non-streaming request with an event stream".to_string(),
+        ));
+    }
+    Err(GatewayError::Upstream(format!(
+        "upstream body is not JSON: {parse_error} (first bytes: {})",
+        snippet(bytes)
+    )))
+}
+
+/// The first bytes of a body, for an error message that has to say what came
+/// back without persisting a megabyte of it. Non-UTF-8 and control characters
+/// are escaped by the lossy conversion plus `escape_debug`.
+fn snippet(bytes: &[u8]) -> String {
+    let head = &bytes[..bytes.len().min(120)];
+    format!("{:?}", String::from_utf8_lossy(head))
+}
+
 /// A failed send attempt: either the per-provider response-header timeout
 /// elapsed or the transport itself broke (connect/DNS/reset).
 enum SendFailure {
@@ -575,6 +638,44 @@ pub(crate) async fn send_upstream(
 mod tests {
     use super::*;
     use crate::forward::test_support::provider;
+
+    /// The three non-document shapes a conversion leg's buffered body can take,
+    /// each answered for its own sake: an empty 200 is an upstream failure named
+    /// as one, an event stream the provider should not have sent is assembled
+    /// (OpenAI) or refused plainly (Anthropic), and anything else is reported
+    /// with the bytes that arrived — the evidence "not JSON" never carried.
+    #[test]
+    fn a_buffered_body_is_a_document_or_a_named_failure() {
+        let ok = StatusCode::OK;
+        assert_eq!(
+            upstream_json(br#"{"ok":true}"#, ok, Protocol::OpenAI).unwrap()["ok"],
+            true
+        );
+
+        let empty = upstream_json(b" \n", ok, Protocol::OpenAI).unwrap_err();
+        assert!(
+            empty.to_string().contains("empty body"),
+            "an empty 200 is said plainly: {empty}"
+        );
+
+        let stream = b"data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
+        let assembled = upstream_json(stream, ok, Protocol::OpenAI).expect("assembled");
+        assert_eq!(assembled["choices"][0]["message"]["content"], "hi");
+
+        // The same bytes against an Anthropic upstream are not that provider's
+        // shape, so they are refused rather than mis-assembled.
+        let refused = upstream_json(stream, ok, Protocol::Anthropic).unwrap_err();
+        assert!(refused.to_string().contains("event stream"), "{refused}");
+
+        let html = upstream_json(b"<!DOCTYPE html><h1>502</h1>", ok, Protocol::OpenAI)
+            .unwrap_err()
+            .to_string();
+        assert!(html.contains("not JSON"), "{html}");
+        assert!(
+            html.contains("DOCTYPE"),
+            "the first bytes are quoted: {html}"
+        );
+    }
 
     #[test]
     fn retryable_status_classification() {

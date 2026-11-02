@@ -49,6 +49,49 @@ pub(crate) fn log_failure(
     );
 }
 
+/// [`log_failure`] with the upstream's own answer attached.
+///
+/// A leg that fails on the upstream's *body* knows what came back, and that is
+/// the one fact a reader needs to tell an HTML error page from an empty write
+/// from a stream that should not have been sent. It is capped and redacted by
+/// the same rules as a successful response before it is stored — this is
+/// still an upstream body, and an upstream error is as likely to echo a
+/// credential as a success is.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn log_failure_with_upstream(
+    state: &GatewayState,
+    log: Option<&CompletedLog>,
+    provider: &UpstreamProvider,
+    routed: &RoutedRequest,
+    status: StatusCode,
+    kind: &str,
+    message: String,
+    upstream_body: &[u8],
+    upstream_headers: Option<&HeaderMap>,
+) {
+    let (body, truncated) = cap_body(
+        upstream_body,
+        state.log_config().max_body_bytes,
+        &state.redactor(),
+    );
+    crate::log_capture::persist_failure_with(
+        &state.store,
+        log.map(|l| &l.capture),
+        Some(routed.agent.clone()),
+        Some(attribution_str(routed.attribution)),
+        Some(provider.id.clone()),
+        status,
+        kind,
+        message,
+        Some(crate::log_capture::FailureUpstream {
+            body,
+            headers: upstream_headers.map(response_headers_text),
+            size: upstream_body.len() as i64,
+            truncated,
+        }),
+    );
+}
+
 /// Close out the full-log row of a buffered response: the body as the client
 /// saw it (capped, redacted), its size, and the status. `response_headers` is
 /// `None` for a leg that already wrote them — an upstream response is not the

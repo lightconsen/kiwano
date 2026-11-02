@@ -697,6 +697,24 @@ pub fn persist_attempt_failure(
     }
 }
 
+/// What the upstream sent back on a failure row — kept so the next occurrence
+/// of the same failure can be diagnosed instead of guessed at.
+///
+/// A conversion that fails on the upstream's *body* is the case this exists
+/// for: "not JSON" says nothing about whether the answer was an HTML page, an
+/// empty write, or a stream the provider should not have sent. The text is
+/// already capped and credential-redacted by the caller, which is the side that
+/// holds the state's redactor and body cap.
+pub struct FailureUpstream {
+    /// The response body, capped and redacted.
+    pub body: String,
+    /// The response headers, redacted; `None` when the caller had none to pass.
+    pub headers: Option<String>,
+    /// The size before any capping.
+    pub size: i64,
+    pub truncated: bool,
+}
+
 /// Persist a request that failed before/inside the forward leg (no usage).
 /// Best-effort: logging problems never change the client response.
 #[allow(clippy::too_many_arguments)]
@@ -709,6 +727,33 @@ pub fn persist_failure(
     status: StatusCode,
     error_kind: &str,
     error_message: String,
+) {
+    persist_failure_with(
+        store,
+        capture,
+        agent,
+        attribution,
+        provider_id,
+        status,
+        error_kind,
+        error_message,
+        None,
+    );
+}
+
+/// [`persist_failure`] with the upstream's answer attached. See
+/// [`FailureUpstream`].
+#[allow(clippy::too_many_arguments)]
+pub fn persist_failure_with(
+    store: &Store,
+    capture: Option<&RequestCapture>,
+    agent: Option<String>,
+    attribution: Option<String>,
+    provider_id: Option<String>,
+    status: StatusCode,
+    error_kind: &str,
+    error_message: String,
+    upstream: Option<FailureUpstream>,
 ) {
     let Some(c) = capture else {
         return;
@@ -738,12 +783,12 @@ pub fn persist_failure(
         latency_ms: None,
         first_token_ms: None,
         request_headers: c.request_headers.clone(),
-        response_headers: None,
+        response_headers: upstream.as_ref().and_then(|u| u.headers.clone()),
         request_body: c.request_body.clone(),
-        response_body: None,
+        response_body: upstream.as_ref().map(|u| u.body.clone()),
         request_size: c.request_size,
-        response_size: 0,
-        truncated: c.truncated,
+        response_size: upstream.as_ref().map_or(0, |u| u.size),
+        truncated: c.truncated || upstream.as_ref().is_some_and(|u| u.truncated),
         // Pre-forward failures carry no token usage and hence no cost.
         cost: None,
         cost_currency: None,
@@ -1002,6 +1047,49 @@ mod tests {
             .expect("capture");
         c.set_body(body.as_bytes(), Some(1024 * 1024), &Redactor::default());
         c
+    }
+
+    /// A failure row keeps the upstream's own answer when the caller has it:
+    /// "not JSON" is a verdict, and the next reader needs the evidence it was
+    /// reached from — the body, its size, and the headers the provider sent it
+    /// with. Rows written by a path that has no upstream answer keep `None`.
+    #[test]
+    fn a_failure_row_can_carry_the_upstream_response() {
+        let (_dir, store) = crate::store::test_support::temp_store();
+        let capture = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
+            .expect("capture");
+
+        crate::log_capture::persist_failure_with(
+            &store,
+            Some(&capture),
+            Some("claude".into()),
+            Some("key".into()),
+            Some("p-1".into()),
+            StatusCode::BAD_GATEWAY,
+            "conversion_failed",
+            "upstream body is not JSON".into(),
+            Some(FailureUpstream {
+                body: "<html>bad gateway</html>".into(),
+                headers: Some(r#"{"content-type":"text/html"}"#.into()),
+                size: 23,
+                truncated: false,
+            }),
+        );
+
+        let (_, total) = store
+            .list_request_logs(1, 10, crate::store::RequestLogFilter::default())
+            .expect("list");
+        assert_eq!(total, 1);
+        let row = store.get_request_log(1).expect("read").expect("a row");
+        assert_eq!(
+            row.response_body.as_deref(),
+            Some("<html>bad gateway</html>")
+        );
+        assert_eq!(row.entry.response_size, 23);
+        assert_eq!(
+            row.entry.response_headers.as_deref(),
+            Some(r#"{"content-type":"text/html"}"#)
+        );
     }
 
     /// A chat-shaped client resends the whole history, so one request already

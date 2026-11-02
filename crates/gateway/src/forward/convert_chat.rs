@@ -32,13 +32,15 @@ use kiwano_adapters::proxy::providers::transform::{anthropic_to_chat, chat_to_an
 
 use crate::error::GatewayError;
 use crate::forward::convert::proxy_error_into_response;
-use crate::forward::finish::{buffered_response, finish_log, log_failure, sse_response};
+use crate::forward::finish::{
+    buffered_response, finish_log, log_failure, log_failure_with_upstream, sse_response,
+};
 use crate::forward::headers::{
     copy_response_headers, response_headers_text, upstream_key_and_headers,
 };
 use crate::forward::sample::{attribution_str, CompletedLog, UsageSample};
 use crate::forward::stream::StreamPolicy;
-use crate::forward::upstream::{read_body_or_response, send_upstream};
+use crate::forward::upstream::{read_body_or_response, send_upstream, upstream_json};
 use crate::forward::BoxError;
 use crate::meter::{parse_response_usage, request_model, Usage};
 use crate::router::RoutedRequest;
@@ -286,17 +288,15 @@ pub(crate) async fn forward_chat_via_anthropic(
             return buffered_response(&state, bytes, sample, status, response_headers);
         }
 
-        let chat = match serde_json::from_slice::<serde_json::Value>(&bytes)
-            .map_err(|e| GatewayError::Upstream(format!("upstream body is not JSON: {e}")))
-            .and_then(|v| {
-                anthropic_to_chat(v)
-                    .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
-            }) {
+        let chat = match upstream_json(&bytes, status, Protocol::Anthropic).and_then(|v| {
+            anthropic_to_chat(v)
+                .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
+        }) {
             Ok(v) => v,
             Err(e) => {
                 let message = e.to_string();
                 let resp = error_into_response(e, inbound);
-                log_failure(
+                log_failure_with_upstream(
                     &state,
                     log.as_ref(),
                     provider,
@@ -304,6 +304,8 @@ pub(crate) async fn forward_chat_via_anthropic(
                     resp.status(),
                     "conversion_failed",
                     message,
+                    &bytes,
+                    Some(&response_headers),
                 );
                 return resp;
             }

@@ -288,6 +288,26 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
     let Ok(envelope) = serde_json::from_slice::<UsageEnvelope>(body) else {
         return (None, None);
     };
+    usage_of(protocol, &envelope)
+}
+
+/// The same read, from a document that has already been parsed.
+///
+/// A response the gateway had to *assemble* — an event stream sent to a
+/// non-streaming request — never existed as one JSON body, so the byte reading
+/// above cannot see it. The assembled document is the envelope, and metering it
+/// here is what keeps such a request from being recorded as zero tokens.
+pub fn parse_usage_value(
+    protocol: Protocol,
+    envelope: serde_json::Value,
+) -> (Option<Usage>, Option<String>) {
+    match serde_json::from_value::<UsageEnvelope>(envelope) {
+        Ok(envelope) => usage_of(protocol, &envelope),
+        Err(_) => (None, None),
+    }
+}
+
+fn usage_of(protocol: Protocol, envelope: &UsageEnvelope) -> (Option<Usage>, Option<String>) {
     let mut scanner = UsageScanner::new();
     match protocol {
         Protocol::Anthropic => {
@@ -313,7 +333,13 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
     // No usage recorded → report none, regardless of whether a model id was
     // seen (an all-default Usage carries no numbers worth reporting).
     let usage = (scanner.usage != Usage::default()).then_some(scanner.usage);
-    (usage, envelope.model.or(envelope.model_version))
+    (
+        usage,
+        envelope
+            .model
+            .clone()
+            .or_else(|| envelope.model_version.clone()),
+    )
 }
 
 /// Extract the `model` field from an inbound request body (authoritative for
@@ -380,6 +406,25 @@ mod tests {
         let usage = usage.expect("usage past the filler");
         assert_eq!(usage.input_tokens, 11);
         assert_eq!(usage.output_tokens, 22);
+    }
+
+    /// A document the gateway assembled from an event stream is metered like
+    /// any other body: without this read, a provider that ignores
+    /// `stream: false` would have every request recorded as zero tokens.
+    #[test]
+    fn an_assembled_document_is_metered_like_a_body() {
+        let assembled = kiwano_adapters::proxy::providers::assemble::assemble_chat_sse(
+            br#"data: {"id":"c1","model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"hi"}}],"usage":{"prompt_tokens":11,"completion_tokens":22}}
+
+data: [DONE]
+
+"#,
+        )
+        .expect("assembled");
+        let (usage, model) = parse_usage_value(Protocol::OpenAI, assembled);
+        assert_eq!(model.as_deref(), Some("deepseek-chat"));
+        let usage = usage.expect("the assembled usage");
+        assert_eq!((usage.input_tokens, usage.output_tokens), (11, 22));
     }
 
     #[test]

@@ -19,6 +19,19 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A provider that answers a non-streaming request with an event stream is no
+  longer a 502.** Some resellers implement only the streaming path and ignore
+  `stream: false` — and some label the result `application/json`, so the gateway
+  buffered it and failed to parse it as one document. The stream is now
+  assembled into the completion it described (text, tool calls merged by index,
+  the final `finish_reason` and usage), and metered from that document rather
+  than recorded as zero tokens. An empty `200` is reported as what it is — an
+  upstream failure — instead of a JSON parse error, and a failed conversion now
+  keeps the upstream's body and headers on the log row, which is the evidence
+  the old message never carried.
+
 ## [0.4.8] - 2026-11-02
 
 **The version where the two charts finally show the same week.** A provider

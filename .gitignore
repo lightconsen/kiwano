@@ -2,9 +2,11 @@
 
 # Claude Code: the skill is the project's (committed, inert unless invoked);
 # the settings beside it are whoever is working here — their permissions,
-# worktree preferences and hooks. Those are ignored by name rather than by
-# directory, because `.claude/settings.json` and `.claude/skills/` are meant
-# to be shared when a project has them.
+# worktree preferences, hooks, and the environment block a client writes when
+# it points at another endpoint. That block holds a live API key, so both
+# settings files are ignored by name rather than by directory: a checkout must
+# never inherit someone's credentials through a shared file.
+.claude/settings.json
 .claude/settings.local.json
 .claude/worktrees/
 

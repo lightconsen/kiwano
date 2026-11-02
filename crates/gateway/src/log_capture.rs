@@ -275,9 +275,24 @@ fn scrub_shapes(text: &str) -> String {
     if spans.is_empty() {
         return text.to_string();
     }
+    // **Merge overlapping matches before rewriting.** A JWT's payload segment
+    // starts with `eyJ` as well (it is base64 of `{"`), and the scan only
+    // skips positions inside a token run — a `.` is not a token byte, so the
+    // payload began a second match *inside* the first. Rewriting those in
+    // order sliced `text[cursor..start]` with `start` behind `cursor` and
+    // panicked the daemon; and even without the panic the second rewrite
+    // would have left the first match's tail in the log. The union of the two
+    // is one credential, so one `[REDACTED]` is the right answer.
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+    for (start, end) in spans {
+        match merged.last_mut() {
+            Some((_, last_end)) if start < *last_end => *last_end = (*last_end).max(end),
+            _ => merged.push((start, end)),
+        }
+    }
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
-    for (start, end) in spans {
+    for (start, end) in merged {
         out.push_str(&text[cursor..start]);
         out.push_str(REDACTED);
         cursor = end;
@@ -751,6 +766,29 @@ pub fn persist_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A JWT's second segment starts with `eyJ` too — base64 of `{"` — so the
+    /// shape scan found a *second* match beginning inside the first, and the
+    /// rewrite then sliced a range that ran backwards. The daemon died on it:
+    /// `byte range starts at 406 but ends at 384`, eleven times in one day,
+    /// each crash taking the admin plane down with it.
+    #[test]
+    fn overlapping_shape_matches_do_not_panic_and_do_not_leak() {
+        // A real-shaped JWT: header, payload (JSON, hence `eyJ`), signature.
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.\
+                   abcdefghijklmnopqrstuvwxyz012345";
+        let text = format!("Authorization: Bearer {jwt} end");
+
+        let out = scrub_shapes(&text);
+        assert!(!out.contains(jwt), "the whole token is gone: {out}");
+        assert!(!out.contains("eyJzdWIiOiIx"), "including its middle: {out}");
+        assert!(out.ends_with(" end"), "and the rest survives: {out}");
+
+        // Two credentials on one line: both go, neither eats the other.
+        let two = format!("first {jwt} second {jwt}");
+        let out = scrub_shapes(&two);
+        assert_eq!(out.matches(REDACTED).count(), 2, "{out}");
+    }
 
     /// The pass that is a guarantee rather than a rule: a credential the store
     /// knows about, sitting in free text under no recognizable name.

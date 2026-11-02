@@ -19,6 +19,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-02
+
+**The version where a gateway-only session still says how long it was.**
+Chat-shaped clients resend their history on every request, so Kiwano now counts
+turns from that traffic instead of leaving the Sessions column blank whenever
+no transcript was imported. A session id wrapped in JSON is unwrapped too,
+instead of turning one conversation into a thousand one-request rows.
+
+This is also the release where a provider can be let back in by hand. A breaker
+that opened on failures used to stay open until its timeout, even after the key
+was replaced or the proxy fixed. **Reset breaker** in the edit dialog — or
+`kiwano providers reset-circuit <ID>` — closes it now and says which agents were
+being held back.
+
 ### Added
 
 - **A provider's circuit breaker can be reset by hand.** Four consecutive

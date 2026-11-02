@@ -19,6 +19,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-11-02
+
+**The version where a reseller's event stream is no longer an error.** Some
+providers implement only the streaming path: ask for a non-streaming answer and
+they send the stream anyway, sometimes labelled `application/json`. Kiwano
+buffered it, tried to parse it as one document, and answered 502 — "upstream
+body is not JSON" — while the whole answer sat there, one `data:` line at a
+time. It is now assembled into the completion it described, and metered from
+that rather than recorded as a free request.
+
+Failed conversions also keep what the upstream actually sent. "Not JSON" was
+never enough to tell an HTML error page from an empty write, and the row said
+nothing else.
+
 ### Fixed
 
 - **A provider that answers a non-streaming request with an event stream is no

@@ -28,6 +28,7 @@
 //! that fills it.
 
 pub mod cache;
+pub mod commandcode;
 pub mod dispatch;
 pub mod http;
 pub mod json;

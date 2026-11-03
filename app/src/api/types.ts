@@ -218,6 +218,9 @@ export const PLAN_QUERY_TEMPLATES: {
     fields: [{ key: "quota_url", labelKey: "addProvider.fieldQuotaUrl" }],
   },
   { id: "opencode_go", labelKey: "addProvider.tplOpencodeGo", fields: [] },
+  // Two rolling windows and a monthly balance; no credential fields beyond
+  // the provider key it already stores.
+  { id: "commandcode", labelKey: "addProvider.tplCommandCode", fields: [] },
   {
     id: "volcengine",
     labelKey: "addProvider.tplVolcengine",

@@ -1,6 +1,7 @@
 //! Template dispatch: the table mapping a `plan_query` template to its
 //! adapter, the per-template credential validators, and the price hints.
 
+use crate::plan_quota::commandcode::query_commandcode;
 use crate::plan_quota::http::client;
 use crate::plan_quota::kimi::query_kimi;
 use crate::plan_quota::minimax::query_minimax;
@@ -66,6 +67,7 @@ pub(crate) async fn run_template(
             }
         }
         "opencode_go" => query_opencode_go(&client, api_key).await,
+        "commandcode" => query_commandcode(&client, api_key).await,
         "volcengine" => {
             let ak = field_str(fields, "access_key_id");
             let sk = field_str(fields, "secret_access_key");

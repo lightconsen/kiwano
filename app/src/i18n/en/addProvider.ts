@@ -179,6 +179,7 @@ export const addProvider = {
   tplMinimax: "MiniMax",
   tplZenmux: "ZenMux",
   tplOpencodeGo: "OpenCode Go",
+  tplCommandCode: "Command Code",
   tplVolcengine: "Volcengine Ark",
   fieldOrgId: "Org ID",
   fieldProjectId: "Project ID",

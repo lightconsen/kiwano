@@ -89,7 +89,12 @@ panic the credential scrubber and take the gateway down with it.
   a line could join Friday to Sunday and hide a silent Saturday. Both now read
   one series: seven local days, zero-filled.
 
-## [0.4.7] - 2026-11-02
+## [0.4.7] - 2026-11-02 — withdrawn
+
+Tagged, then withdrawn before it was published: the release workflow was
+cancelled and both the draft and the tag are gone. Its fix ships in 0.4.8, and
+the section stays here so the version number does not appear to have been
+skipped in the history.
 
 **The version where a JWT in a prompt could take the gateway down.** The
 credential scrubber that runs before a request body is stored found a JWT's

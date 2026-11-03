@@ -19,6 +19,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-11-03
+
+**The version where a correct answer stops reading as a broken one.** The
+gateway forwarded your client's `accept-encoding` to the provider and then tried
+to parse the compressed reply as JSON — a 502 whose message pointed at the
+gateway and whose cause looked like the vendor. The header is no longer
+forwarded; the transport negotiates its own and decodes it, so what the
+converters and the meter read is the document that was sent. Streaming was
+never affected, which is why the failures only showed up on the retries.
+
 ### Fixed
 
 - **A compressed upstream answer no longer reads as a broken one.** The client's

@@ -97,8 +97,11 @@ export const providers = {
   detailTransport: "传输",
   detailNoProxy: "直连",
   detailDefault: "默认",
+  detailPlanUsage: "套餐用量",
+  detailResets: "{time} 重置",
   detailRecent: "最近的请求",
   openDetailTitle: "双击进入该供应商的详情页",
+  openDetail: "打开详情",
 
 
   viewGraph: "图形视图",

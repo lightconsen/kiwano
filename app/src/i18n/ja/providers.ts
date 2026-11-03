@@ -99,8 +99,11 @@ export const providers = {
   detailTransport: "転送",
   detailNoProxy: "直接",
   detailDefault: "既定",
+  detailPlanUsage: "プラン使用量",
+  detailResets: "リセット {time}",
   detailRecent: "最近のリクエスト",
   openDetailTitle: "ダブルクリックで詳細ページを開く",
+  openDetail: "詳細を開く",
 
 
   viewGraph: "グラフ表示",

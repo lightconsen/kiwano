@@ -501,6 +501,8 @@ export default function Providers({
         routes={routes}
         agentDetect={agentDetect}
         onEdit={onEdit}
+        // The same report the row's ring reads — one read, two renderings.
+        plan={planQuotas[openProviderId] ?? undefined}
       />
     );
   }
@@ -522,7 +524,10 @@ export default function Providers({
             about. Same slot, same reason — the strip says which tab you are
             on, and this says what that tab holds. */}
         {seg === "all" ? (
-          <span className="ml-1.5 shrink-0 whitespace-nowrap text-[11.5px] text-mut">
+          // The strip keeps the room: it is the switch, and this is the
+          // sentence about it. A Japanese sentence is long enough to take the
+          // space several segments need, so it yields (and truncates) first.
+          <span className="ml-1.5 min-w-0 truncate text-[11.5px] text-mut">
             {t("providers.counts", { providers: providers.length, agents: agentsBound })}
           </span>
         ) : (

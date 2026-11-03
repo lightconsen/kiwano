@@ -2,7 +2,7 @@
 // share, and the All tab's row itself.
 import { useEffect, useState } from "react";
 
-import { Gauge, Pause, Play, RefreshCw, SquarePen, Trash2 } from "lucide-react";
+import { ChevronRight, Gauge, Pause, Play, RefreshCw, SquarePen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { iconForEndpoint } from "@/components/icons/infer";
@@ -441,6 +441,20 @@ export function ProviderRow({
           {confirmDel ? t("providers.confirm") : <Trash2 className="h-3.5 w-3.5" />}
         </Button>
       </div>
+      {/* The row opens on a double-click — a gesture nobody discovers from a
+          tooltip, and the page is where the plan windows and the request
+          history live. This is the row saying so: a chevron at the end,
+          revealed with the actions, that opens it on a single click. Its width
+          is always reserved, so the reveal moves no columns. */}
+      <button
+        type="button"
+        className="ml-1 flex h-7 w-5 shrink-0 items-center justify-center rounded text-mut opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+        aria-label={t("providers.openDetail")}
+        title={t("providers.openDetail")}
+        onClick={() => onOpen(p)}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
     </div>
     {consequence && (
       <div

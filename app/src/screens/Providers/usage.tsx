@@ -17,7 +17,7 @@ export function ringColor(billing: Provider["billing"], pct: number): string {
 /** One quota tier, e.g. `5h window 42%`. Falls back to the backend's own tier
     name, so a tier added there before this list knows about it still reads as
     something rather than disappearing. */
-function tierLabel(name: string, t: Translate): string {
+export function tierLabel(name: string, t: Translate): string {
   const key = PLAN_TIER_LABEL_KEYS[name];
   return key ? t(key) : name;
 }

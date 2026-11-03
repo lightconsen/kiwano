@@ -95,8 +95,11 @@ export const providers = {
   detailTransport: "傳輸",
   detailNoProxy: "直連",
   detailDefault: "預設",
+  detailPlanUsage: "方案用量",
+  detailResets: "{time} 重置",
   detailRecent: "最近的請求",
   openDetailTitle: "雙擊進入該供應商的詳情頁",
+  openDetail: "開啟詳情",
 
 
   viewGraph: "圖形檢視",

@@ -271,6 +271,20 @@ describe("a provider's own page", () => {
     expect(window.location.hash).toBe(`#providers/one/${encodeURIComponent("deepseek")}`);
   });
 
+  it("the chevron at the row's end opens the page in one click", async () => {
+    // The double-click is the gesture; the chevron is the signpost. It is a
+    // real button so the affordance is a target, not decoration.
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    window.location.hash = "";
+    const user = userEvent.setup();
+    render(<Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} />);
+
+    await user.click(await screen.findByRole("button", { name: en.providers.openDetail }));
+    expect(window.location.hash).toBe(`#providers/one/${encodeURIComponent("deepseek")}`);
+  });
+
   it("renders the provider the route names, and comes back to the list", async () => {
     apiMock.listProviders.mockResolvedValue([deepseek()]);
     apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
@@ -290,6 +304,62 @@ describe("a provider's own page", () => {
 
     await user.click(screen.getByRole("button", { name: en.app.nav.apps }));
     expect(window.location.hash).toBe("#providers");
+  });
+
+  it("shows each plan window with what it spent against its cap", async () => {
+    // The list's ring answers "how close is the tightest window"; the page has
+    // room for the rest — every window, its amounts, and when it resets.
+    apiMock.listProviders.mockResolvedValue([
+      deepseek({
+        billing: "plan",
+        plan_query: { template: "commandcode" },
+        plan_limits: { five_hour: 80, weekly: 90 },
+      }),
+    ]);
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
+    apiMock.listApiKeys.mockResolvedValue([]);
+    apiMock.getPlanQuota.mockResolvedValue({
+      provider_id: "deepseek",
+      template: "commandcode",
+      success: true,
+      error: null,
+      note: "48.66 credits left this month",
+      tiers: [
+        {
+          name: "five_hour",
+          utilization: 13.2,
+          resets_at: "2026-11-03T07:37:27+00:00",
+          used: 1.85,
+          limit: 14,
+          unit: "USD",
+        },
+        {
+          name: "weekly_limit",
+          utilization: 59.1,
+          resets_at: "2026-11-06T12:34:29+00:00",
+          used: 20.7,
+          limit: 35,
+          unit: "USD",
+        },
+      ],
+      queried_at: 0,
+      cached: false,
+    });
+    render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} openProviderId="deepseek" />,
+    );
+
+    expect(await screen.findByText(en.providers.detailPlanUsage)).toBeInTheDocument();
+    // The tiers arrive with the quota read, not with the provider list.
+    expect(await screen.findByText(en.providers.tierFiveHour)).toBeInTheDocument();
+    expect(screen.getByText(en.providers.tierWeekly)).toBeInTheDocument();
+    // The amounts, not just the percentage: "13%" alone cannot say 13% of what.
+    expect(screen.getByText("$1.85 / $14")).toBeInTheDocument();
+    expect(screen.getByText("$20.7 / $35")).toBeInTheDocument();
+    // The month is a balance the endpoint reports, and it says so.
+    expect(screen.getByText("48.66 credits left this month")).toBeInTheDocument();
   });
 
   it("opens a request under the provider, and its breadcrumb walks back through it", async () => {

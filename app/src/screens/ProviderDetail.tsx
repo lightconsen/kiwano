@@ -21,18 +21,30 @@ import { iconForEndpoint } from "@/components/icons/infer";
 import { Dot } from "../components/bits";
 import { agentMeta } from "../lib/agents";
 import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
+import { tierLabel } from "./Providers/usage";
 import { useT } from "../i18n";
 import type {
   AgentDetect,
   AgentRoute,
   AgentRef,
   ApiKeyEntry,
+  PlanQuotaReport,
   Provider,
   RequestLogEntry,
 } from "../api/types";
 
 /** How many of this provider's most recent requests the page lists. */
 const RECENT = 12;
+
+/** `2026-11-06T12:34:00+00:00` → `11-06 20:34` in the reader's own clock, the
+    same shape the sessions list stamps rows with. A reset in the past reads as
+    the time it was, which is what the endpoint said. */
+function fmtReset(ts: string): string {
+  const at = new Date(ts);
+  if (Number.isNaN(at.getTime())) return ts;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
 
 /** What this provider's requests cost, in the currency it bills in — absent
     when the summary carries no figure (no priced traffic in the window). */
@@ -48,6 +60,7 @@ export default function ProviderDetail({
   routes,
   agentDetect,
   onEdit,
+  plan,
 }: {
   providerId: string;
   /** The whole list, from the screen the page was opened from — one read, two
@@ -56,6 +69,9 @@ export default function ProviderDetail({
   routes: AgentRoute[] | null;
   agentDetect: AgentDetect[] | null;
   onEdit: (p: Provider) => void;
+  /** This provider's live plan quota, when it is configured with a query. The
+      list already reads it; the page shows the same report window by window. */
+  plan?: PlanQuotaReport;
 }) {
   const t = useT();
   const [logs, setLogs] = useState<RequestLogEntry[] | null>(null);
@@ -236,6 +252,62 @@ export default function ProviderDetail({
             {fmtMoney(cost(provider)!.amount, cost(provider)!.currency)}
           </span>
         </div>
+      )}
+
+      {/* The plan's own windows, one row each: what the endpoint reports as
+          spent against its cap, and when that window resets. Read-only — the
+          ⟳ that bypasses the five-minute cache lives on the list — and absent
+          entirely for a provider with no plan query configured. */}
+      {provider.plan_query && (
+        <section className="mt-4">
+          <h3 className="mb-1.5 text-[12.5px] font-semibold">{t("providers.detailPlanUsage")}</h3>
+          {!plan ? (
+            <div className="py-3 text-center text-[11.5px] text-mut">{t("common.loading")}</div>
+          ) : !plan.success ? (
+            <div className="rounded-lg border border-line bg-surface px-3 py-3 text-[11.5px] text-mut">
+              {plan.error ?? t("common.none")}
+            </div>
+          ) : (
+            <>
+              <div className="overflow-hidden rounded-lg border border-line">
+                {plan.tiers.map((tier) => {
+                  const pct = Math.min(100, Math.max(0, Math.round(tier.utilization)));
+                  const tone = pct >= 95 ? "var(--red)" : pct >= 80 ? "var(--amber)" : "var(--kiwi)";
+                  return (
+                    <div
+                      key={tier.name}
+                      className="flex items-center gap-3 border-b border-line px-3 py-2 text-[11.5px] last:border-b-0"
+                    >
+                      <span className="w-[84px] shrink-0 text-mut">{tierLabel(tier.name, t)}</span>
+                      <span
+                        className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full"
+                        style={{ background: "var(--surface2)" }}
+                      >
+                        <span
+                          className="block h-full rounded-full"
+                          style={{ width: `${pct}%`, background: tone }}
+                        />
+                      </span>
+                      <span className="w-[38px] shrink-0 text-right font-mono">{pct}%</span>
+                      {/* The absolute pair when the endpoint reports amounts —
+                          a percentage alone cannot say whether "50%" is $7 of
+                          $14 or $175 of $350. */}
+                      <span className="w-[128px] shrink-0 text-right font-mono text-mut">
+                        {tier.used != null && tier.limit != null && tier.unit
+                          ? `${fmtMoney(tier.used, tier.unit)} / ${fmtMoney(tier.limit, tier.unit)}`
+                          : "—"}
+                      </span>
+                      <span className="w-[124px] shrink-0 text-right text-mut">
+                        {tier.resets_at ? t("providers.detailResets", { time: fmtReset(tier.resets_at) }) : ""}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {plan.note && <p className="mt-1 text-[10.5px] text-mut">{plan.note}</p>}
+            </>
+          )}
+        </section>
       )}
 
       {/* Who it serves, and where it sits in each queue. */}

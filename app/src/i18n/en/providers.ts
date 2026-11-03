@@ -125,8 +125,11 @@ export const providers = {
   detailTransport: "Transport",
   detailNoProxy: "direct",
   detailDefault: "default",
+  detailPlanUsage: "Plan usage",
+  detailResets: "resets {time}",
   detailRecent: "Recent requests",
   openDetailTitle: "Double-click for this provider's page",
+  openDetail: "Open details",
 
 
   // ── The agent tab's two views ──

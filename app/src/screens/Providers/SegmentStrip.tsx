@@ -53,38 +53,46 @@ export function SegmentStrip({
 }) {
   const t = useT();
   return (
-    <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
-      {visibleSegments.map((s, i) => {
-        const label = segmentLabel(t, s.id);
-        const ver = s.id === "all" ? undefined : agentVersions[s.id];
-        return (
-          <button
-            key={s.id}
-            title={s.id === "all" ? label : ver ? `${label} · v${ver}` : label}
-            aria-label={label}
-            className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
-            onClick={() => pickSeg(s.id)}
-          >
-            {s.icon ? (
-              <ProviderLogo icon={s.icon} name={label} size={15} />
-            ) : s.id !== "all" ? (
-              // Any agent with no mark to port — a user-defined route, or a
-              // built-in whose logo has not been supplied — reads as its own
-              // letter, in the colour the resolver derived for it. The rule
-              // used to be "a built-in always has a mark", which stopped
-              // being true the moment one arrived without.
-              <ProviderLogo
-                char={agentMeta(s.id).chip_char}
-                color={agentMeta(s.id).chip_color}
-                name={label}
-                size={15}
-              />
-            ) : (
-              <span className="text-[12px] text-mut">{label}</span>
-            )}
-          </button>
-        );
-      })}
+    // Two boxes, not one: the segments scroll when there are more agents than
+    // the header holds, and the "+" must not scroll out of reach with them —
+    // it is the way the one you cannot see comes to exist. The height is fixed
+    // because an overlay scrollbar (always shown with a mouse on macOS) would
+    // otherwise make the strip taller than the 44px header and paint its bar
+    // over the column headings below.
+    <div className="flex h-8 min-w-0 items-center gap-1">
+      <div className="flex min-w-0 overflow-x-auto rounded-lg border border-line text-[12px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {visibleSegments.map((s, i) => {
+          const label = segmentLabel(t, s.id);
+          const ver = s.id === "all" ? undefined : agentVersions[s.id];
+          return (
+            <button
+              key={s.id}
+              title={s.id === "all" ? label : ver ? `${label} · v${ver}` : label}
+              aria-label={label}
+              className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
+              onClick={() => pickSeg(s.id)}
+            >
+              {s.icon ? (
+                <ProviderLogo icon={s.icon} name={label} size={15} />
+              ) : s.id !== "all" ? (
+                // Any agent with no mark to port — a user-defined route, or a
+                // built-in whose logo has not been supplied — reads as its own
+                // letter, in the colour the resolver derived for it. The rule
+                // used to be "a built-in always has a mark", which stopped
+                // being true the moment one arrived without.
+                <ProviderLogo
+                  char={agentMeta(s.id).chip_char}
+                  color={agentMeta(s.id).chip_color}
+                  name={label}
+                  size={15}
+                />
+              ) : (
+                <span className="text-[12px] text-mut">{label}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
       {/* Its own button rather than part of the strip: the strip is a
           switch between agents that exist, and this is how one comes to. */}
       <Menu>

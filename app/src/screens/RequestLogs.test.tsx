@@ -492,10 +492,14 @@ describe("the sessions view", () => {
     expect(cost.textContent).toBe("$2.5 (+3 unpriced)");
     expect(cost.firstElementChild?.className).toContain("break-words");
 
-    // The same for the agent, whose longest id in the roster is
-    // `deepseek-harness` — 114px of text in a column budgeted at 64.
+    // The agent is the one cell that truncates: a custom id is user-chosen and
+    // unbounded (`hello-92fc46` is a real one), and a second line here pushed
+    // every column to its right out of alignment. The label is what a reader
+    // knows the agent by; the id it is addressed by rides in the tooltip.
     const agent = row.querySelectorAll("td")[2];
-    expect(agent.firstElementChild?.className).toContain("break-words");
+    expect(agent.firstElementChild?.className).toContain("truncate");
+    expect(agent.getAttribute("title")).toBe("claude");
+    expect(agent.textContent).toBe("Claude Code");
   });
 
   it("pages the list, and counts what is there rather than what is on screen", async () => {

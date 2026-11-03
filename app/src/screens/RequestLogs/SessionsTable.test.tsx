@@ -9,6 +9,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { Session } from "@/api/types";
+import { rememberCustomAgents } from "@/lib/agents";
 
 import { SessionsTable } from "./SessionsTable";
 
@@ -80,6 +81,17 @@ describe("the TURNS column", () => {
     const cells = screen.getAllByRole("cell");
     expect(cells.some((c) => c.textContent === "—")).toBe(true);
     expect(cells.some((c) => c.textContent === "0")).toBe(false);
+  });
+
+  it("names a custom agent the way the app does, on one line", () => {
+    // `hello-92fc46` is a real id here: the label is what the reader chose,
+    // and the id is only how the route is addressed — so the cell shows the
+    // label and the tooltip keeps the id. One line, every row.
+    rememberCustomAgents([{ id: "hello-92fc46", label: "Hello" }]);
+    renderRows([session("s-custom", { source: "gateway", agent: "hello-92fc46" })]);
+    const cell = screen.getByTitle("hello-92fc46");
+    expect(cell.textContent).toBe("Hello");
+    expect(cell.firstElementChild?.className).toContain("truncate");
   });
 
   it("keeps the files' count when both sides have one", () => {

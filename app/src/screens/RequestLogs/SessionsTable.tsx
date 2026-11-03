@@ -11,6 +11,7 @@
 // never converted outside the Dashboard.
 
 import { useT } from "../../i18n";
+import { agentMeta } from "../../lib/agents";
 import { fmtTokens } from "../../lib/format";
 import type { Session } from "../../api/types";
 import { fmtSessionCost, fmtStamp, SourceBadge } from "./sessionBits";
@@ -47,9 +48,9 @@ export function SessionsTable({
           different value, and a longer row is cheaper than a wrong one. */}
       <table className="w-full table-fixed text-[11.5px]">
         <colgroup>
-          <col className="w-[27%]" />
+          <col className="w-[24%]" />
           <col className="w-[84px]" />
-          <col className="w-[64px]" />
+          <col className="w-[88px]" />
           <col className="w-[10%]" />
           <col className="w-[54px]" />
           <col className="w-[44px]" />
@@ -108,8 +109,14 @@ export function SessionsTable({
               <td className="whitespace-nowrap px-1.5 py-1.5 align-top font-sans text-mut">
                 {fmtStamp(r.ended_at)}
               </td>
-              <td className="px-1.5 py-1.5 align-top font-sans">
-                <span className="block break-words">{r.agent}</span>
+              {/* The agent's own name where the app knows one — "Hello", not
+                  `hello-92fc46` — because the id is how the route is addressed,
+                  not how it is read. A custom id is user-chosen and can be
+                  arbitrarily long, so this one cell truncates: its tooltip is
+                  the id, and a row that grows a second line for it would push
+                  every column below it out of alignment. */}
+              <td className="px-1.5 py-1.5 align-top font-sans" title={r.agent}>
+                <span className="block truncate">{agentMeta(r.agent).label}</span>
               </td>
               {/* The project is the files' dimension — the gateway sees requests,
                   not the checkout they came from — so a traffic-only row has

@@ -5,7 +5,7 @@
 import { type KeyPath, type Messages, type Translate } from "../../i18n";
 import { fmtMoney } from "../../lib/format";
 import type { CatalogEntry } from "../../api/types";
-import { byTagRank } from "./order";
+import { byAdded, byTagRank } from "./order";
 import { rateText, tierRates, type PriceTier } from "./prices";
 
 // ── the view grouped by model ────────────────────────────────────────────
@@ -122,11 +122,19 @@ export function buildModelGroups(entries: CatalogEntry[], query: string): ModelG
         return { entry: e, rate, value: published !== null && Number.isFinite(published) ? published : null };
       })
       .sort((a, b) => {
-        if (a.value === null || b.value === null) {
-          if (a.value === null && b.value === null) return byTagRank(a.entry, b.entry);
-          return a.value === null ? 1 : -1;
-        }
-        return a.value - b.value || byTagRank(a.entry, b.entry);
+        // Own providers lead here too: the model view is a different cut of
+        // the same catalog, and "mine first" is a fact about the reader, not
+        // about the column being sorted.
+        return (
+          byAdded(a.entry, b.entry) ||
+          (a.value === null || b.value === null
+            ? a.value === null && b.value === null
+              ? byTagRank(a.entry, b.entry)
+              : a.value === null
+                ? 1
+                : -1
+            : a.value - b.value || byTagRank(a.entry, b.entry))
+        );
       });
     if (rows.length < (q === "" ? 2 : 1)) continue;
     // Each rate in the currency it is published in, and a range only when they

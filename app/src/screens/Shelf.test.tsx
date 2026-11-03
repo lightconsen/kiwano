@@ -351,3 +351,35 @@ describe("the detail dialog", () => {
     expect(rowOf("kimi-k2.6").textContent).not.toContain(en.shelf.priceCacheWrite1h);
   });
 });
+
+describe("own providers lead the catalog", () => {
+  it("keeps them first under a column sort, not only in the default order", async () => {
+    // The shelf lists everything the Hub publishes; the entries already wired
+    // into this machine are the ones a reader is looking for. That is a fact
+    // about the reader, not about the column, so it holds whichever column is
+    // sorting — and the pinned row says so itself, with its ×N badge.
+    const user = userEvent.setup();
+    await renderShelf([
+      entry("aaa", "AAA"),
+      entry("zzz", "ZZZ", { added: true, added_count: 1 }),
+      entry("mmm", "MMM"),
+    ]);
+    const names = () => [...document.querySelectorAll("tbody tr")].map((r) => r.textContent ?? "");
+
+    // Unsorted: ours first, then the default trust order.
+    expect(names()[0]).toContain("ZZZ");
+
+    // Name ascending would put AAA first; the pinned row stays on top and the
+    // rest is still alphabetical.
+    await user.click(screen.getByText(en.shelf.colName));
+    expect(names()[0]).toContain("ZZZ");
+    expect(names()[1]).toContain("AAA");
+    expect(names()[2]).toContain("MMM");
+
+    // Name descending: the same split, the other way round inside it.
+    await user.click(screen.getByText(en.shelf.colName));
+    expect(names()[0]).toContain("ZZZ");
+    expect(names()[1]).toContain("MMM");
+    expect(names()[2]).toContain("AAA");
+  });
+});

@@ -16,6 +16,11 @@ export default defineConfig(() => ({
     // The screens are DOM components: `document` has to exist before they render.
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // Vitest's 5 s default is a per-test budget that the whole machine shares:
+    // with one worker per test file (22 of them) a test that types into a form
+    // char by char can spend most of it waiting for a CPU. Ten seconds is still
+    // short enough that a real hang fails the run rather than stalling it.
+    testTimeout: 10_000,
     // Screens and their imports only — `src/api/dev.ts` is a fixture module, not
     // a unit to be discovered as one.
     include: ["src/**/*.test.{ts,tsx}"],

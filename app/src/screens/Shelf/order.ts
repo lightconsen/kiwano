@@ -47,22 +47,24 @@ export const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; classN
 export const byTagRank = (a: CatalogEntry, b: CatalogEntry): number =>
   TAG_RANK[a.tag] - TAG_RANK[b.tag] || a.name.localeCompare(b.name);
 
-/** Own providers first — but only as a tie-break.
+/** Own providers first, in **every** order.
  *
  * The shelf lists the whole catalog, and the entries already wired into the
- * local setup are the ones a reader is most often looking for, which is why they
- * lead the default order. They used to be pinned above *every* ordering, applied
- * as a pass after the column sort; because `sort` is stable that did not reorder
- * the list but split it into two runs, each internally sorted, and concatenated
- * them. Sorting by Billing then read Plan, Plan, Pay as you go, Unlimited, Pay as
- * you go… — a column that looks broken, and the same trick hid behind Price,
- * where a pinned expensive provider floated above cheaper ones.
+ * local setup are the ones a reader is most often looking for: they lead the
+ * default order, and they lead a column sort too — the list reads as "mine,
+ * then the rest", and each pinned row carries its own `×N` badge, so the split
+ * is visible rather than looking like a column that stopped working.
  *
- * As a tie-break it costs nothing and still helps: prices repeat across the
- * catalog (the same model resold at the same rate), and there own-first is a
- * sensible way to order two rows the column cannot separate.
+ * This was a tie-break for a while, out of a real complaint: pinning used to be
+ * a second pass over a sorted list, which split it into two runs each sorted by
+ * the column, and a reader saw Plan, Plan, Pay as you go, Unlimited, Pay as you
+ * go… and called the column broken. Leading the comparator is the same split —
+ * the difference is that the order is now stated once, as the first key, and
+ * the column's own meaning ("by billing") is true inside each run instead of
+ * across the whole table.
  */
-const byAdded = (a: CatalogEntry, b: CatalogEntry): number => Number(b.added) - Number(a.added);
+export const byAdded = (a: CatalogEntry, b: CatalogEntry): number =>
+  Number(b.added) - Number(a.added);
 
 /** Rows in the user's chosen order (or the default one when they have not
     chosen). Sorting by price needs the currency conversion, and a row with no
@@ -74,29 +76,33 @@ export function orderRows(rows: CatalogEntry[], sort: Sort | null): CatalogEntry
   // Destructured so the narrowing survives into the comparator closure.
   const { key, dir } = sort;
   if (key === "name") {
-    return [...rows].sort((a, b) => a.name.localeCompare(b.name) * dir || byAdded(a, b));
+    return [...rows].sort((a, b) => byAdded(a, b) || a.name.localeCompare(b.name) * dir);
   }
   if (key === "billing") {
     return [...rows].sort((a, b) => {
       const ra = billingRank(a.billing);
       const rb = billingRank(b.billing);
+      const added = byAdded(a, b);
+      if (added !== 0) return added;
       if (ra === null || rb === null) {
-        if (ra === null && rb === null) return byAdded(a, b) || a.name.localeCompare(b.name);
+        if (ra === null && rb === null) return a.name.localeCompare(b.name);
         return ra === null ? 1 : -1;
       }
       // Within one mode by name, unflipped: the mode is what the column ranks,
       // and flipping it should not also reverse the names inside each group.
-      return (ra - rb) * dir || byAdded(a, b) || a.name.localeCompare(b.name);
+      return (ra - rb) * dir || a.name.localeCompare(b.name);
     });
   }
   return rows
     .map((e) => ({ e, p: priceValue(e) }))
     .sort((a, b) => {
+      const added = byAdded(a.e, b.e);
+      if (added !== 0) return added;
       if (a.p === null || b.p === null) {
-        if (a.p === null && b.p === null) return byAdded(a.e, b.e) || byTagRank(a.e, b.e);
+        if (a.p === null && b.p === null) return byTagRank(a.e, b.e);
         return a.p === null ? 1 : -1;
       }
-      return (a.p - b.p) * dir || byAdded(a.e, b.e);
+      return (a.p - b.p) * dir;
     })
     .map((x) => x.e);
 }

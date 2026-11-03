@@ -19,6 +19,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A compressed upstream answer no longer reads as a broken one.** The client's
+  `accept-encoding` was forwarded as-is, so a provider was free to answer a
+  non-streaming request with Brotli — bytes the gateway then tried to parse as
+  JSON, reporting `upstream body is not JSON` and a 502 that looked like the
+  vendor's fault. The header is no longer forwarded: the transport negotiates
+  its own encoding and decodes it, so the converters and the meter see the
+  document the provider meant to send. Streaming answers were unaffected (SSE is
+  not compressed), which is why only the non-streaming retries failed.
+
 ## [0.4.9] - 2026-11-02
 
 **The version where a reseller's event stream is no longer an error.** Some

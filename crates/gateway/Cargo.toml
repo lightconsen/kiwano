@@ -15,7 +15,10 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-reqwest = { version = "0.13", features = ["stream", "json"] }
+# `gzip`/`brotli`/`deflate`/`zstd` are not optional: the gateway negotiates its
+# own `accept-encoding` (the client's is never forwarded — see
+# `forward::headers`) and must be able to read what it agreed to.
+reqwest = { version = "0.13", features = ["stream", "json", "gzip", "brotli", "deflate", "zstd"] }
 futures-core = "0.3.34"
 futures-util = "0.3.34"
 kiwano-adapters = { path = "../adapters" }

@@ -106,9 +106,19 @@ impl SelectedKey {
     }
 }
 
-/// Build upstream request headers: copy the inbound set (minus hop-by-hop and
-/// local auth headers), then inject the provider's real credential in its
-/// native auth style.
+/// Build upstream request headers: copy the inbound set (minus hop-by-hop,
+/// local auth, and content-negotiation headers), then inject the provider's
+/// real credential in its native auth style.
+///
+/// **`accept-encoding` is not forwarded.** The client's list is a promise its
+/// own HTTP stack can keep; the gateway is a proxy that *reads* the body (to
+/// meter it, to convert protocols, to replay an error), so forwarding that
+/// promise makes it promise something it cannot keep. Providers that answer a
+/// non-streaming request with Brotli then hand back bytes the JSON parser
+/// cannot read — the `502 upstream body is not JSON` that looked like an
+/// upstream fault. The transport negotiates its own encoding (and decodes it)
+/// instead; the client still gets what it asked for, just decompressed on this
+/// machine rather than at the provider.
 pub(crate) fn build_upstream_headers(
     inbound: &HeaderMap,
     provider: &UpstreamProvider,
@@ -121,6 +131,7 @@ pub(crate) fn build_upstream_headers(
             || k == axum::http::header::AUTHORIZATION
             || k == "x-api-key"
             || k == "x-goog-api-key"
+            || k == axum::http::header::ACCEPT_ENCODING
             || is_hop_by_hop(k)
         {
             continue;
@@ -324,6 +335,28 @@ mod tests {
         assert_eq!(headers.get("content-type").unwrap(), "application/json");
         // The placeholder key must never reach the upstream.
         assert!(headers.get(axum::http::header::AUTHORIZATION).is_none());
+    }
+
+    /// The client's `accept-encoding` is a promise its own stack can keep; the
+    /// gateway is the one that has to read the body, so forwarding the promise
+    /// made it read Brotli as JSON — the `502 upstream body is not JSON` that
+    /// looked like an upstream fault on 2026-11-03.
+    #[test]
+    fn the_clients_accept_encoding_is_not_forwarded() {
+        let mut inbound = inbound_headers();
+        inbound.insert(
+            axum::http::header::ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, deflate, br, zstd"),
+        );
+        let headers =
+            build_upstream_headers(&inbound, &provider(Protocol::OpenAI, None), "sk-real-key")
+                .unwrap();
+        assert!(
+            headers.get(axum::http::header::ACCEPT_ENCODING).is_none(),
+            "the transport negotiates its own, and decodes what it agreed to"
+        );
+        // Everything else still crosses: the strip is one header, not a policy.
+        assert_eq!(headers.get("user-agent").unwrap(), "claude-code/1.0");
     }
 
     #[test]

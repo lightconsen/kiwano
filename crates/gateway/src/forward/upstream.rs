@@ -793,6 +793,55 @@ mod tests {
         (format!("http://{addr}/v1/chat/completions"), handle)
     }
 
+    /// The transport decodes what it negotiated.
+    ///
+    /// This is the other half of "do not forward the client's
+    /// `accept-encoding`": with the features enabled, reqwest adds its own
+    /// list and decompresses the answer, so the bytes reaching the converters
+    /// and the meter are the JSON the provider meant to send. Without it, a
+    /// provider that Brotli-compresses a non-streaming answer hands back
+    /// bytes the parser calls "not JSON" — the 502 on 2026-11-03.
+    #[tokio::test]
+    async fn the_transport_decodes_the_compression_it_negotiated() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // Brotli of `{"ok":true,"model":"m"}`.
+        const BODY: &[u8] = &[
+            0x0b, 0x0b, 0x80, 0x7b, 0x22, 0x6f, 0x6b, 0x22, 0x3a, 0x74, 0x72, 0x75, 0x65, 0x2c,
+            0x22, 0x6d, 0x6f, 0x64, 0x65, 0x6c, 0x22, 0x3a, 0x22, 0x6d, 0x22, 0x7d, 0x03,
+        ];
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a loopback port");
+        let addr = listener.local_addr().expect("a bound port has an address");
+        tokio::spawn(async move {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 8192];
+            let _ = sock.read(&mut buf).await;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                 Content-Encoding: br\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                BODY.len()
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            let _ = sock.write_all(BODY).await;
+            let _ = sock.shutdown().await;
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/v1/chat/completions"))
+            .send()
+            .await
+            .expect("the stub answers");
+        assert!(
+            response.headers().get("content-encoding").is_none(),
+            "a decoded body is not described as encoded"
+        );
+        let body = response.bytes().await.expect("the body reads");
+        assert_eq!(&body[..], br#"{"ok":true,"model":"m"}"#);
+    }
+
     /// The loop, not the predicate: a 429 is re-sent, and the second answer is
     /// the one the caller gets.
     #[tokio::test]

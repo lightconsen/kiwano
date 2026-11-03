@@ -19,6 +19,40 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-11-03
+
+**The version where a provider's page knows what it is spending.** Command
+Code's rolling five-hour and weekly windows are queried like any other plan's,
+and the provider's own page shows every window — percentage, the amount spent
+against its cap, and when it resets — instead of leaving that to the list's one
+ring. A chevron at the end of a row opens that page in one click, because a
+double-click is a gesture nobody discovers from a tooltip.
+
+The Models catalog leads with the providers already added, whichever column is
+sorting. And two layout defects are gone: the agent strip no longer grows past
+the header in Japanese, and a session names its agent ("Hello") instead of
+wrapping the raw id over two lines.
+
+### Added
+
+- **A plan query for Command Code**, and the plan windows on the provider's
+  page. `GET /alpha/billing/credits` reports a rolling five-hour and a weekly
+  window with the amounts spent and left; the month is a credit balance and is
+  shown as one, because the endpoint has no monthly usage route.
+- **A chevron at the row's end** opens the provider's page in one click, with
+  its own "Open details" label — the double-click still works.
+- **The Models catalog leads with your providers**, under every sort.
+
+### Fixed
+
+- **The agent strip no longer overflows the header.** Its scrollbar (always
+  shown with a mouse on macOS) made it taller than the 44px bar and painted over
+  the column headings; the fixes are a fixed height, a hidden bar, a "+" outside
+  the scrolling box, and a counts sentence that yields its width first.
+- **A session shows its agent's name, on one line.** `hello-92fc46` now reads
+  "Hello", with the id in the tooltip and a wider column — a custom id has no
+  length bound, so that one cell truncates.
+
 ## [0.4.10] - 2026-11-03
 
 **The version where a correct answer stops reading as a broken one.** The

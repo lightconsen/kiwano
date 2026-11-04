@@ -17,7 +17,7 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
-## [Unreleased]
+## [0.4.12] - 2026-11-04
 
 **The version where the gateway stops remembering failures.** The failure
 circuit breaker is gone. It was a per-agent, per-provider state machine that
@@ -28,6 +28,23 @@ proxy stayed refused until someone found **Reset breaker** in the provider
 dialog. Routing now answers a simpler question: is this binding enabled, and is
 the provider under its billing limit? Nothing observed from traffic is
 remembered between requests.
+
+**And every provider row is drawn with the logo the catalog publishes for it.**
+A provider's mark used to be inferred from its endpoint URL, and only that: a
+Command Code provider — whose entry the Hub had illustrated all along — showed
+a "C". A row linked to a catalog entry now wears that entry's logo, resolved
+against the Hub like every other catalog image; the endpoint is asked only when
+no entry names the provider, and the letter avatar is the last resort. The same
+mark is used everywhere a provider appears: the list, its own page, the route
+graph and the binding menus.
+
+### Fixed
+
+- **A provider's logo now comes from its catalog entry first.** The mark is the
+  entry's published `logo` (as `ProviderVm.catalog_logo`), then the brand the
+  endpoint host names, then the initial. A provider is matched to its entry by
+  its link where one exists, and by endpoint URL for a row added before the
+  catalog was ever synced.
 
 ### Removed
 

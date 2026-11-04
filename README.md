@@ -166,8 +166,8 @@ pointed at the port by hand is refused), read the logs, export the config. See
 The data plane (`127.0.0.1:8317`) carries two read-only endpoints outside the
 agent-key gate, for the tools that cannot hold the app's credentials: `GET
 /health` (liveness for a supervisor) and `GET /metrics` (Prometheus text
-format, gauges for routed agents, route candidates, open breakers and usage
-counts — never a key or a request body).
+format, gauges for routed agents, route candidates and usage counts — never a
+key or a request body).
 
 By default `/metrics` answers any local process, but the per-agent labels come
 back **hashed**, so a scrape still distinguishes agents without naming them.

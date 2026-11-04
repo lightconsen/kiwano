@@ -2,7 +2,9 @@
 // licensed under the MIT License.
 // Source: src-tauri/src/error.rs
 // Copied on 2026-09-07. Modified for Kiwano (dropped the rusqlite `From` impl
-// and the skill-error formatting helper to avoid unneeded dependencies).
+// and the skill-error formatting helper to avoid unneeded dependencies, and
+// `AllProvidersCircuitOpen`, which went with the gateway's circuit breaker on
+// 2026-11-04).
 
 use std::path::Path;
 use std::sync::PoisonError;
@@ -65,8 +67,6 @@ pub enum AppError {
     Database(String),
     #[error("the OMO config file does not exist")]
     OmoConfigNotFound,
-    #[error("every provider is circuit-broken; no channel is left")]
-    AllProvidersCircuitOpen,
     #[error("no provider is configured")]
     NoProvidersConfigured,
 }
@@ -141,7 +141,6 @@ mod tests {
             AppError::McpValidation("x".into()),
             AppError::Database("x".into()),
             AppError::OmoConfigNotFound,
-            AppError::AllProvidersCircuitOpen,
             AppError::NoProvidersConfigured,
         ];
         for error in errors {

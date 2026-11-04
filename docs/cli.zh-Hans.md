@@ -104,7 +104,6 @@ kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
 kiwano providers edit <ID> [any of the above]
 kiwano providers use <ID> --agent AGENT      switch an agent, forcing single strategy
 kiwano providers enable <ID>                 make it the current route, keeping the strategy
-kiwano providers reset-circuit <ID>          close its breaker for every agent routed to it
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers price <ID> --model M --input X --output Y
@@ -153,11 +152,6 @@ timeout。
 除非供应商是套餐,否则 `--plan-limit-*` 会被拒绝(否则底层会默默丢弃这个值,
 而一个什么都不做的标志比一个会拒绝的标志更糟)。`--plan-query` 才是
 `providers quota` 能问到任何东西的前提。
-
-`providers reset-circuit` 是唯一一个不改动供应商任何东西的供应商命令。熔断器活在
-运行中的守护进程内存里(连续失败四次,就把发给该 Agent 的路由关上一分钟),所以你
-刚换好的 Key 或修好的代理,在这一分钟过去之前仍然会被拒绝。这条命令会关掉该供应商
-所有的熔断器,并列出确实被挡住的 Agent——这一点任何配置编辑都告诉不了你。
 
 `--unit` 说明 `--limit` 计数的是什么:`requests`、`wan_tokens`,或 Hub 公布了
 汇率的某种货币。最后一种只做检查而不存储,遇到不认识的就以退出码 2 结束,并
@@ -481,7 +475,6 @@ CLI *确实*会记录的是供应商对应哪个条目,因为那决定了它的�
 | 网关状态 + 今日总计 | `status` |
 | 供应商列表 / 添加 / 编辑 / 删除 | `providers list\|add\|edit\|remove` |
 | 把供应商设为当前 | `providers enable`, `providers use` |
-| 重置供应商的熔断器 | `providers reset-circuit`,或编辑对话框里的**重置熔断** |
 | 延迟 / 端点 / 模型探测 | `providers probe …` |
 | 套餐配额环 | `providers quota` |
 | 轮换 API 密钥 | `keys list\|add\|remove` |

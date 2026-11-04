@@ -1,5 +1,5 @@
-//! `least-busy`: the breaker-available candidate with the fewest requests
-//! currently in flight, priority order breaking ties.
+//! `least-busy`: the candidate with the fewest requests currently in flight,
+//! priority order breaking ties.
 //!
 //! Roundrobin spreads by a shared clock (the weighted ring); this spreads by
 //! the actual queue — the reasoning-model case where one candidate is chewing
@@ -29,8 +29,8 @@ impl Drop for InflightGuard {
 
 impl StrategyEngine {
     /// Take one seat at `agent:provider_id`, creating the counter on first use.
-    /// Keyed like the breakers (`agent:provider_id`) — the same pair the
-    /// candidate list addresses.
+    /// Keyed by `agent:provider_id` — the same pair the candidate list
+    /// addresses.
     pub(crate) async fn inflight_guard(&self, agent: &str, provider_id: &str) -> InflightGuard {
         let key = format!("{agent}:{provider_id}");
         let counter = {
@@ -44,11 +44,8 @@ impl StrategyEngine {
         InflightGuard { counter }
     }
 
-    /// The candidate with the fewest in-flight requests among those whose
-    /// breaker is closed — priority order breaks ties, and when every breaker
-    /// is open the request goes to the primary anyway, on the same terms as
-    /// `failover`: the gateway does not invent a failure of its own; the real
-    /// upstream is the one that gets to say no.
+    /// The candidate with the fewest in-flight requests — priority order breaks
+    /// ties.
     ///
     /// Draining first, like every sticky strategy: a conversation keeps its
     /// provider while it runs, so the upstream prompt cache it built survives.
@@ -62,9 +59,6 @@ impl StrategyEngine {
         }
         let mut best: Option<(usize, usize)> = None; // (in-flight, candidate index)
         for i in 0..route.candidates.len() {
-            if !self.candidate_available(route, i).await {
-                continue;
-            }
             let busy = self
                 .inflight
                 .lock()
@@ -78,13 +72,7 @@ impl StrategyEngine {
         }
         let chosen = match best {
             Some((_, i)) => route.candidates[i].clone(),
-            None => {
-                tracing::warn!(
-                    agent = %route.agent,
-                    "all candidates circuit-open; falling back to primary"
-                );
-                Self::primary(route)?
-            }
+            None => Self::primary(route)?,
         };
         self.assign_drained(route, session, &chosen);
         Ok(chosen)
@@ -176,32 +164,20 @@ mod tests {
         assert_eq!(fresh.id, "a");
     }
 
-    /// Every breaker open: the gateway does not invent a failure of its own —
-    /// the request goes to the primary and lets the real upstream say no.
+    /// Every candidate equally idle: priority order decides, and a provider
+    /// that failed earlier is not skipped — nothing remembers the failure.
     #[tokio::test]
-    async fn all_candidates_open_falls_back_to_the_primary() {
+    async fn an_idle_tie_goes_to_the_primary() {
         let engine = StrategyEngine::new();
         let s = store();
         let r = route(
             StrategyType::LeastBusy,
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
-        for p in ["a", "b"] {
-            for _ in 0..4 {
-                engine
-                    .record(
-                        "claude",
-                        p,
-                        crate::strategy::circuit_breaker::AttemptOutcome::Failed,
-                        false,
-                    )
-                    .await;
-            }
-        }
         let picked = engine
             .select(&s, &r, None, &crate::limits::LimitState::default())
             .await
             .unwrap();
-        assert_eq!(picked.id, "a", "the primary, not an invented failure");
+        assert_eq!(picked.id, "a");
     }
 }

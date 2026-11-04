@@ -106,7 +106,7 @@ impl StrategyEngine {
     /// Session-granularity stickiness is what keeps a conversation's upstream
     /// prompt cache intact, and it belongs to every strategy whose answer can
     /// change while a conversation is running: roundrobin's ring, the quota
-    /// threshold, a closing time window, a provider recovering from a failure.
+    /// threshold, a closing time window.
     ///
     /// A *new* session asks the strategy and goes wherever it says. A session
     /// already running stays put, because the alternative is rebuilding a prefix
@@ -117,23 +117,16 @@ impl StrategyEngine {
     ///
     /// What drain does *not* do is spend past a ceiling. The candidate list this
     /// looks in has already had the providers over a billing limit pruned out of
-    /// it, and a breaker that has opened fails the availability check below —
-    /// so a pin holds only while the provider is genuinely usable, and a hard
-    /// limit still wins over a conversation in flight.
+    /// it, so a pin holds only while the provider is genuinely usable, and a
+    /// hard limit still wins over a conversation in flight.
     pub(crate) async fn pinned(
         &self,
         route: &AgentRoute,
         session: Option<&str>,
     ) -> Option<crate::router::UpstreamProvider> {
         let key = sticky_key(&route.agent, session);
-        // The lock only guards the table read (a guard must not be held across
-        // await, or the future is not Send).
         let id = self.sticky.lock().expect("sticky map poisoned").get(&key)?;
-        let idx = route.candidates.iter().position(|c| c.id == id)?;
-        if self.candidate_available(route, idx).await {
-            return Some(route.candidates[idx].clone());
-        }
-        None
+        route.candidates.iter().find(|c| c.id == id).cloned()
     }
 
     /// [`Self::pinned`] for the strategies that *drain*: pin a conversation, and

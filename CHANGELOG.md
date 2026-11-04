@@ -19,6 +19,36 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+**The version where the gateway stops remembering failures.** The failure
+circuit breaker is gone. It was a per-agent, per-provider state machine that
+stopped sending requests after four consecutive errors and reopened only after
+a timeout — so a provider that started working again was still refused for a
+minute, and a provider that had been fixed, re-keyed or moved behind a working
+proxy stayed refused until someone found **Reset breaker** in the provider
+dialog. Routing now answers a simpler question: is this binding enabled, and is
+the provider under its billing limit? Nothing observed from traffic is
+remembered between requests.
+
+### Removed
+
+- **The failure circuit breaker.** Consecutive-failure counting, the
+  open/half-open state machine, the half-open probe permit, the 429 cooldown and
+  the separate 401/auth circuit are all deleted. A failing attempt now costs one
+  round trip and is retried or failed over by the data plane as before; nothing
+  is recorded about it, so a provider that recovers is used again on the very
+  next request. A request can no longer be refused with `503 circuit_open`.
+- **The 401 body replay.** A 401 from an upstream is passed back to the client
+  as the upstream's own answer, and the request is not captured and re-sent
+  elsewhere on the strength of it.
+- **`kiwano providers reset-circuit`**, the `reset_provider_circuit` app command
+  and the **Reset breaker** button in the provider dialog's Advanced section.
+  There is no longer anything to reset.
+- **The `kiwano_circuit_open` and `kiwano_auth_failed` metrics**, and the
+  `auth_failed` gateway event the tray and notification list reacted to.
+
+Billing limits are untouched: a provider over its limit is still not a
+candidate, and an agent over its own limit is still refused.
+
 ## [0.4.11] - 2026-11-03
 
 **The version where a provider's page knows what it is spending.** Command

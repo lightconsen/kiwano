@@ -157,9 +157,6 @@ pub enum GatewayEvent {
     LimitHit { provider_id: String, reason: String },
     /// The inverse of [`GatewayEvent::LimitHit`]: back under the limit.
     LimitCleared { provider_id: String },
-    /// The provider refused its key enough times that the breaker opened with
-    /// the auth-failed mark — the fix is a new key, not a wait.
-    AuthFailed { agent: String, provider_id: String },
     /// A plan-quota report was **re-fetched** from the vendor, so whatever the
     /// screen shows for that provider is now out of date.
     ///
@@ -638,10 +635,6 @@ pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Resp
             (StatusCode::FORBIDDEN, "model_not_allowed")
         }
         GatewayError::ProviderNotAllowed { .. } => (StatusCode::FORBIDDEN, "provider_not_allowed"),
-        // 503, not 502: nothing upstream went wrong, the provider is simply not
-        // being asked right now (open, or a recovery probe is already in
-        // flight). It clears itself once the breaker's timeout elapses.
-        GatewayError::CircuitOpen { .. } => (StatusCode::SERVICE_UNAVAILABLE, "circuit_open"),
         GatewayError::ProviderNotFound(_) => (StatusCode::SERVICE_UNAVAILABLE, "provider_missing"),
         GatewayError::UnsupportedPath(_) => (StatusCode::NOT_FOUND, "unsupported_path"),
         GatewayError::Upstream(_) | GatewayError::Http(_) => {

@@ -246,12 +246,6 @@ export default function App() {
         case "limit_hit":
           void notify(t("app.notifyLimitTitle"), e.reason);
           break;
-        case "auth_failed":
-          void notify(
-            t("app.notifyAuthTitle"),
-            `${e.provider_id} — ${e.agent}`,
-          );
-          break;
         case "limit_cleared":
           break;
         // The vendor's own counter moved, so the number on the screen is stale.

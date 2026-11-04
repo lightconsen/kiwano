@@ -92,14 +92,6 @@ pub(crate) fn refresh_with_event<R: tauri::Runtime>(
             format!("Limit cleared: {}", v["provider_id"].as_str().unwrap_or("")),
             "#dashboard".to_string(),
         ),
-        Some("auth_failed") => (
-            format!(
-                "Key invalid: {} ({})",
-                v["provider_id"].as_str().unwrap_or(""),
-                v["agent"].as_str().unwrap_or("agent")
-            ),
-            "#providers".to_string(),
-        ),
         _ => return Ok(()), // usage ticks and unknown kinds do not surface here
     };
 

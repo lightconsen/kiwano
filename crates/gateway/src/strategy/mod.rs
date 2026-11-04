@@ -2,22 +2,21 @@
 //!
 //! Strategies (agent_strategies.type):
 //! - `single` — fixed primary (MVP semantics, equivalent to the current switch flow)
-//! - `failover` — take the first "breaker-available" candidate in priority order; when all are open, fall back to the primary
+//! - `failover` — the first candidate in priority order
 //! - `roundrobin` — session-granularity stickiness + weighted rotation (a session keeps its
-//!   Provider to preserve the upstream prompt cache; new sessions pick by weight; reassigned when the sticky candidate goes unavailable)
+//!   Provider to preserve the upstream prompt cache; new sessions pick by weight)
 //! - `timewindow` — match the binding's local `HH:MM` window (supports crossing
 //!   midnight); falls back to the primary when nothing matches
 //! - `quota` — when the primary's same-day usage (requests/tokens, read from usage
 //!   aggregates) exceeds the threshold in the strategy config, sink to backups (failover semantics)
-//! - `least-busy` — the breaker-available candidate with the fewest requests
-//!   currently in flight (sessions drain first, like the other sticky strategies);
-//!   priority order breaks ties
+//! - `least-busy` — the candidate with the fewest requests currently in flight
+//!   (sessions drain first, like the other sticky strategies); priority order breaks ties
 //!
-//! After each real upstream attempt, the forward layer calls [`StrategyEngine::record`]
-//! to feed the breaker back (key = `agent:provider_id`, tech.md §4.7.3). The outcome
-//! is classified — served / rate-limited / auth-rejected / failed — because a 429
-//! and a 500 call for different treatment: the former sets a short pause the
-//! provider itself named, the latter is what the breaker counts.
+//! There is no failure circuit breaker: a provider is a candidate whenever its
+//! binding is enabled and it is not over a billing limit. A failing attempt costs
+//! one round trip and is retried or failed over by the data plane; nothing is
+//! remembered about it afterwards, so a provider that recovers is used again on
+//! the very next request without waiting out a clock or pressing a reset.
 //!
 //! The module is split by strategy and by the state each one reads. Every `pub`
 //! item keeps the path it had when this was one file (`strategy::StrategyEngine`,
@@ -25,17 +24,14 @@
 //! and the rest of this crate still name it that way.
 //!
 //! `StrategyEngine` itself is defined here rather than in a submodule, because
-//! every arm in the tree adds an `impl StrategyEngine` block to it and the three
+//! every arm in the tree adds an `impl StrategyEngine` block to it and the
 //! fields they reach through are `pub(crate)` — the same shape `store::Store`
 //! has. `selection` owns the dispatch (`plan` names the head and the replay
-//! tail), `breaker_registry` owns the breakers it dispatches around, and each
-//! strategy arm lives with the state it reads: `failover` and `roundrobin`
-//! answer from the breakers, `timewindow` from its own clock, `quota` from its
-//! config payload, `least_busy` from the in-flight counter, and the sticky
-//! table every draining strategy pins through is `sticky`.
+//! tail), and each strategy arm lives with the state it reads: `timewindow` from
+//! its own clock, `quota` from its config payload, `least_busy` from the
+//! in-flight counter, and the sticky table every draining strategy pins through
+//! is `sticky`.
 
-pub mod breaker_registry;
-pub mod circuit_breaker;
 pub mod failover;
 pub mod least_busy;
 pub mod prober;
@@ -53,12 +49,11 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
-use circuit_breaker::CircuitBreaker;
 use sticky::StickyTable;
 
-/// Per-Agent strategy runtime: breaker registry + roundrobin sticky table.
+/// Per-Agent strategy runtime: the roundrobin sticky table and the least-busy
+/// in-flight counters.
 pub struct StrategyEngine {
-    pub(crate) breakers: Mutex<HashMap<String, Arc<CircuitBreaker>>>,
     /// roundrobin: session key → candidate index (sticky to preserve the prompt
     /// cache), bounded — see [`StickyTable`].
     pub(crate) sticky: Mutex<StickyTable>,
@@ -79,7 +74,6 @@ impl Default for StrategyEngine {
 impl StrategyEngine {
     pub fn new() -> Self {
         StrategyEngine {
-            breakers: Mutex::new(HashMap::new()),
             sticky: Mutex::new(StickyTable::new()),
             cursor: Mutex::new(0),
             inflight: Mutex::new(HashMap::new()),

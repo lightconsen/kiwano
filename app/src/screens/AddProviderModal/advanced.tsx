@@ -1,5 +1,5 @@
 // The advanced forwarding settings a provider can carry.
-import { ChevronDown, Gauge, Plus, RotateCcw, XIcon } from "lucide-react";
+import { ChevronDown, Gauge, Plus, XIcon } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,10 +27,6 @@ export function AdvancedSection({
   setAdvHeaders,
   advProxy,
   setAdvProxy,
-  resetCircuit,
-  resetBusy,
-  resetNote,
-  onResetCircuit,
 }: {
   advOpen: boolean;
   setAdvOpen: Dispatch<SetStateAction<boolean>>;
@@ -43,14 +39,6 @@ export function AdvancedSection({
   /** HTTP(S) proxy for this provider only; blank = the gateway default. */
   advProxy: string;
   setAdvProxy: (v: string) => void;
-  /** Edit mode: whether to offer the breaker reset at all — a provider that does
-      not exist yet has no breakers to close. */
-  resetCircuit: boolean;
-  resetBusy: boolean;
-  /** What the last reset answered, already worded. `null` = not tried yet.
-      `error` decides only the colour — the words are the daemon's either way. */
-  resetNote: { text: string; error: boolean } | null;
-  onResetCircuit: () => void;
 }) {
   const t = useT();
   // Case-insensitive, like HTTP itself.
@@ -180,42 +168,6 @@ export function AdvancedSection({
               </Button>
             </div>
           </div>
-          {/* Not a setting: a one-shot action, and the only one in this fold.
-              It lives here because it is recovery for exactly the knobs above —
-              a provider an outage or a bad key knocked out of service, and a
-              proxy or key you have just fixed. It is *not* a form field, so it
-              is never part of the save: the breaker lives in the gateway's
-              memory, and waiting out its timeout is the only alternative. */}
-          {resetCircuit && (
-            <div>
-              <Label className="text-[10.5px] font-medium text-mut">
-                {t("addProvider.resetCircuit")}
-              </Label>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1 h-8 w-full justify-start gap-1.5 text-[11.5px] text-mut"
-                disabled={resetBusy}
-                onClick={onResetCircuit}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {resetBusy ? t("addProvider.resetCircuitBusy") : t("addProvider.resetCircuitAction")}
-              </Button>
-              <p className="mt-1 text-[10.5px] text-mut">{t("addProvider.resetCircuitHint")}</p>
-              {/* The answer, in the two shapes it has: agents that were being
-                  held back, or nothing was. An error rides the same slot — a
-                  reset that failed must not look like one that found nothing. */}
-              {resetNote && (
-                <p
-                  className="mt-1 text-[10.5px]"
-                  role="status"
-                  style={resetNote.error ? { color: "var(--red)" } : undefined}
-                >
-                  {resetNote.text}
-                </p>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>

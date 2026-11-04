@@ -291,9 +291,9 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
 
     // Replay the request down the plan until somebody serves it or the plan runs
     // out. This is the request's own failover: the plan is ordered best-first,
-    // and a candidate that answers 408/429/5xx (or whose breaker refuses it) has
-    // simply not served this request — the client asked once and is owed one
-    // answer, not a list of the gateway's misfortunes.
+    // and a candidate that answers 408/429/5xx has simply not served this
+    // request — the client asked once and is owed one answer, not a list of the
+    // gateway's misfortunes.
     //
     // The plan as a whole carries the same budget a single candidate's retry
     // loop does (`forward/upstream.rs`): a candidate whose Layer-A retries fit

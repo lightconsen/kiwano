@@ -86,12 +86,11 @@ impl StrategyEngine {
             return Ok(vec![Self::primary(route)?]);
         }
         // Every other strategy: providers over a billing limit are not
-        // candidates at all. Pruning the list here, rather than checking inside
-        // `candidate_available`, is what makes it hold for all of them —
-        // `candidate_available` is consulted by failover/roundrobin/quota only,
-        // while `timewindow` indexes `candidates` directly — and so do the
-        // no-backup fallbacks (`Self::primary`, `weighted_next`), which would
-        // otherwise serve a provider the user has already spent out.
+        // candidates at all. Pruning the list here, rather than filtering inside
+        // each arm, is what makes it hold for all of them — `timewindow`
+        // indexes `candidates` directly, and so do the no-backup fallbacks
+        // (`Self::primary`, `weighted_next`), which would otherwise serve a
+        // provider the user has already spent out.
         let pruned = crate::limits::without_blocked(route, limits);
         let usable = pruned.as_ref().unwrap_or(route);
         if usable.candidates.is_empty() {
@@ -172,7 +171,7 @@ mod tests {
     async fn the_plan_lists_the_replay_order_and_single_has_no_tail() {
         let engine = StrategyEngine::new();
         let s = store();
-        let limits = crate::limits::LimitState::default();
+        let under = crate::limits::LimitState::default();
 
         let three = route(
             StrategyType::Failover,
@@ -183,26 +182,17 @@ mod tests {
             ],
         );
         assert_eq!(
-            ids(&engine.plan(&s, &three, None, &limits).await.unwrap()),
+            ids(&engine.plan(&s, &three, None, &under).await.unwrap()),
             vec!["a", "b", "c"]
         );
 
-        // Open the head's breaker: the plan starts at the next available
-        // candidate, and still names every candidate exactly once.
-        for _ in 0..4 {
-            engine
-                .record(
-                    "claude",
-                    "a",
-                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
-                    false,
-                )
-                .await;
-        }
+        // A provider over a billing limit is pruned out of the plan entirely,
+        // so the replay order never names it again.
+        let over = blocked("a");
         assert_eq!(
-            ids(&engine.plan(&s, &three, None, &limits).await.unwrap()),
-            vec!["b", "a", "c"],
-            "the fallback order stays priority order, with the pick moved to the front"
+            ids(&engine.plan(&s, &three, None, &over).await.unwrap()),
+            vec!["b", "c"],
+            "a spent-out provider is not a candidate at all"
         );
 
         // Bound but not a fallback: `single` answers with one provider, so the
@@ -212,7 +202,7 @@ mod tests {
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
         assert_eq!(
-            ids(&engine.plan(&s, &one, None, &limits).await.unwrap()),
+            ids(&engine.plan(&s, &one, None, &under).await.unwrap()),
             vec!["a"]
         );
     }
@@ -266,10 +256,9 @@ mod tests {
         let s = store();
         let engine = StrategyEngine::new();
         let limits = blocked("a");
-        // `candidate_available` only guards failover/roundrobin/quota, and
-        // every strategy has a "fall back to the primary" branch; pruning the
-        // list is what covers them. `single` is absent on purpose — it is the
-        // one strategy that does not fail over, and answers for itself.
+        // Pruning the candidate list is what covers every strategy. `single` is
+        // absent on purpose — it is the one strategy that does not fail over,
+        // and answers for itself.
         for strategy in [
             StrategyType::Failover,
             StrategyType::Roundrobin,

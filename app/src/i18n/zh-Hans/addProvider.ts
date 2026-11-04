@@ -134,16 +134,6 @@ export const addProvider = {
   removeHeader: "移除请求头",
   addHeader: "添加请求头",
 
-  // ── 手动重置熔断（仅编辑时）──
-  resetCircuit: "熔断器",
-  resetCircuitAction: "重置熔断",
-  resetCircuitBusy: "重置中…",
-  resetCircuitHint:
-    "对路由到这里的每个 Agent 一并将熔断器关闭,请求立刻放行,不用等超时。不会改动这个 Provider 本身的任何设置。",
-  resetCircuitNone: "没有需要解除的熔断 —— 所有熔断器本来就是关闭的。",
-  resetCircuitDone: "已关闭 —— {agents} 可以重新发送请求。",
-  resetCircuitFailed: "重置失败：{detail}",
-
   // ── Footer ──
   saving: "保存中…",
   saveEnable: "保存并启用",

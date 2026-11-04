@@ -49,7 +49,7 @@ pub fn rfc3339(epoch_secs: i64) -> String {
 
 // ── "In use" helpers: which candidate would serve a request issued right now,
 //    mirroring the gateway's strategy selection (strategy/mod.rs) minus its
-//    runtime state (circuit breakers, roundrobin sticky sessions) ──
+//    runtime state (roundrobin sticky sessions) ──
 
 // The local-day arithmetic and the window helpers moved to `kiwanod::store::time`
 // with the provider view: the aggregation is their

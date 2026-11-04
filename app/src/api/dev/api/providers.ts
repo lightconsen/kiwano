@@ -1,7 +1,7 @@
 // The provider surface: the gateway's own status, the Apps screen's list, and
 // the add / edit / park / delete paths behind it.
 
-import type { AgentId, GatewayStatus, KiwanoApi, NewProviderInput, PromptLatency, Provider, ResetCircuit } from "../../types";
+import type { AgentId, GatewayStatus, KiwanoApi, NewProviderInput, PromptLatency, Provider } from "../../types";
 import { nextId } from "../ids";
 import { delay } from "../delay";
 import { endpointNote } from "../endpoints";
@@ -18,7 +18,6 @@ export const providersApi: Pick<
   | "deleteProvider"
   | "setProviderEnabled"
   | "testProviderLatency"
-  | "resetProviderCircuit"
 > = {
   async getGatewayStatus(): Promise<GatewayStatus> {
     await delay();
@@ -206,15 +205,4 @@ export const providersApi: Pick<
     return { provider_id: id, model, latency_ms: base, status: 200, error: null };
   },
 
-  async resetProviderCircuit(id: string): Promise<ResetCircuit> {
-    await delay();
-    const p = providers.find((x) => x.id === id);
-    if (!p) throw new Error(`provider not found: ${id}`);
-    // The browser mock has no gateway and so no breakers — there is no state to
-    // clear. It answers with the agents bound to the provider, which is what a
-    // real reset of a provider with an open breaker reports: that is the
-    // sentence the user reads, and `pnpm dev` is the only place it can be
-    // looked at. Nothing in the fixture is actually gated on it.
-    return { blocked_agents: agentsOf(id) };
-  },
 };

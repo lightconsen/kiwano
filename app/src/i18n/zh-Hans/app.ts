@@ -28,7 +28,6 @@ export const app = {
   // Typed gateway events（经 /events 推送；托盘条目是点击入口）
   notifyDlpTitle: "Kiwano 凭证监视",
   notifyLimitTitle: "Kiwano 限额已达",
-  notifyAuthTitle: "Kiwano：Provider key 无效",
 
   billing: {
     payg: "PAYG",

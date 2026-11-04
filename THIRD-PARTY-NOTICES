@@ -40,7 +40,7 @@ Every file below carries the declaration in its own header, naming its
 upstream source and the date it was taken. This list is the index to those
 headers, not a replacement for them.
 
-Copied whole — 18 files, all 2026-09-07. Header declaration only.
+Copied whole — 17 files, all 2026-09-07. Header declaration only.
 
   crates/adapters/src/config.rs
   crates/adapters/src/error.rs
@@ -59,13 +59,14 @@ Copied whole — 18 files, all 2026-09-07. Header declaration only.
   crates/adapters/src/proxy/tool_media.rs
   crates/adapters/src/proxy/providers/streaming.rs
   crates/adapters/src/proxy/providers/transform.rs
-  crates/gateway/src/strategy/circuit_breaker.rs
 
-  Two of these are not a one-to-one rename. `gateway_takeover.rs` folds four
+  One of these is not a one-to-one rename: `gateway_takeover.rs` folds four
   upstream files — `src-tauri/src/{opencode,openclaw,hermes,pi}_config.rs` —
-  into one, and `crates/gateway/src/strategy/circuit_breaker.rs` comes from
-  `src-tauri/src/proxy/circuit_breaker.rs`, which lives outside the `proxy`
-  tree the rest were taken from. Both say so in their own headers.
+  into one, and says so in its own header.
+
+  `circuit_breaker.rs` was a nineteenth file until 2026-11-04, when the
+  breaker was removed from the gateway. Nothing of it remains, so it is no
+  longer listed.
 
 Ported function by function — 1 file. Header declaration plus a
 `// Ported from cc-switch: <upstream path>::<function>` annotation above

@@ -136,16 +136,6 @@ export const addProvider = {
   removeHeader: "移除標頭",
   addHeader: "新增標頭",
 
-  // ── 手動重置熔斷（僅編輯時）──
-  resetCircuit: "熔斷器",
-  resetCircuitAction: "重置熔斷",
-  resetCircuitBusy: "重置中…",
-  resetCircuitHint:
-    "對路由到此處的每個 Agent 一併關閉熔斷器,請求立刻放行,不必等逾時。不會改動這個 Provider 本身的任何設定。",
-  resetCircuitNone: "沒有需要解除的熔斷 —— 所有熔斷器本來就是關閉的。",
-  resetCircuitDone: "已關閉 —— {agents} 可以重新送出請求。",
-  resetCircuitFailed: "重置失敗：{detail}",
-
   // ── Footer ──
   saving: "儲存中…",
   saveEnable: "儲存並啟用",

@@ -608,14 +608,6 @@ pub enum ProvidersCmd {
     /// Put a parked provider back into its routes
     Enable { provider_id: String },
 
-    /// Close the provider's circuit breakers by hand
-    ///
-    /// A breaker opens by itself after repeated failures and closes itself only
-    /// after its timeout, or on a successful probe. When the problem is fixed
-    /// before then — a vendor outage that has ended, a key just replaced — this
-    /// is the way to let traffic through now instead of waiting for a clock.
-    ResetCircuit { provider_id: String },
-
     /// Ask an endpoint whether it answers, before committing to it
     #[command(subcommand)]
     Probe(ProbeCmd),

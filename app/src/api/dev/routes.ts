@@ -118,8 +118,8 @@ export function strategyOf(agent: AgentId): AgentRoute {
 // Mirror vm::build_provider_vms: the "In use" badge marks the provider(s) that
 // would serve a request issued right now under each agent's strategy. Quota
 // mirrors vm::quota_over_threshold too: over the ceiling, the head stops
-// serving and the first backup reads as fallback, not in use — which backup
-// (if any) actually takes a request is the gateway's breakers' runtime call.
+// serving and the first backup reads as fallback, not in use — the backup is
+// only first in line, and the UI must not claim a request it has not observed.
 // The mock fixtures carry window totals, not per-day ones, so the fixture's
 // request count stands in for the day's in `quotaOver`.
 export function servingNow(): Set<string> {
@@ -151,7 +151,7 @@ export function servingNow(): Set<string> {
     } else if (r.strategy === "quota" && quotaOver(r)) {
       // over the ceiling: nothing serves (the backup is first in line, below)
     } else {
-      // single / failover / quota-under: the head (breaker state is gateway runtime)
+      // single / failover / quota-under: the head
       out.add(`${r.agent}/${head}`);
     }
   }

@@ -48,7 +48,6 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             },
         ),
         ProvidersCmd::Enable { provider_id } => providers_set_enabled(ctx, provider_id, true),
-        ProvidersCmd::ResetCircuit { provider_id } => providers_reset_circuit(ctx, provider_id),
         ProvidersCmd::Disable { provider_id } => providers_set_enabled(ctx, provider_id, false),
         ProvidersCmd::Probe(cmd) => providers_probe(cmd, ctx),
         ProvidersCmd::Quota { provider_id, force } => providers_quota(ctx, provider_id, *force),
@@ -399,29 +398,6 @@ fn providers_set_enabled(ctx: &mut Ctx, provider_id: &str, enabled: bool) -> Res
         )
     };
     ctx.out.line(text);
-    Ok(())
-}
-
-fn providers_reset_circuit(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
-    // Read the name before the write, so the message can say whose circuits
-    // these were — an id alone is how the row is addressed, not how it is known.
-    let name = ctx.api.provider_ref(provider_id)?.name;
-    let reset = ctx.api.reset_provider_circuit(provider_id)?;
-    // Two different facts, and the difference is the whole of what this command
-    // reports: something was being held back (and now is not), or nothing was.
-    let text = if reset.blocked_agents.is_empty() {
-        format!("reset {name} ({provider_id}) — no circuit was open")
-    } else {
-        format!(
-            "reset {name} ({provider_id}) — {} may send again",
-            reset.blocked_agents.join(", ")
-        )
-    };
-    let payload = serde_json::json!({
-        "provider_id": provider_id,
-        "blocked_agents": reset.blocked_agents,
-    });
-    ctx.out.emit(&payload, || text);
     Ok(())
 }
 

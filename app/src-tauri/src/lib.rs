@@ -91,8 +91,7 @@ pub use logs::{
 };
 pub use probe::{list_models, test_endpoint, test_latency, test_provider_latency};
 pub use providers::{
-    add_provider, delete_provider, list_providers, reset_provider_circuit, set_provider_enabled,
-    update_provider,
+    add_provider, delete_provider, list_providers, set_provider_enabled, update_provider,
 };
 pub use quota::get_plan_quota;
 pub use sessions::{get_session, list_sessions};
@@ -286,7 +285,6 @@ pub fn run() {
             update_provider,
             delete_provider,
             set_provider_enabled,
-            reset_provider_circuit,
             test_latency,
             test_provider_latency,
             test_endpoint,

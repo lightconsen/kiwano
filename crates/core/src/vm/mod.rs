@@ -93,9 +93,6 @@ pub use provider_edit::{
 // by definition — re-exported here for the same reason the request types above
 // are: the callers (the app's command, the CLI) know it by this path.
 pub use kiwano_api::providers::{AdvancedPatch, BillingConfigPatch, ProviderPatch, ProviderRefVm};
-// The edit dialog's manual circuit reset — the daemon's answer, re-exported for
-// the same reason the patch above is: the app's command names it by this path.
-pub use kiwano_api::providers::ResetCircuitVm;
 pub use providers::{
     billing_to_ui, build_provider_vms, HealthVm, ProviderAdvancedVm, ProviderEndpointVm,
     ProviderVm, QuotaVm, UsageVm,

@@ -2530,39 +2530,6 @@ async fn health_and_metrics_answer_without_a_key_and_leave_no_trace() {
         "{text}"
     );
 
-    // The series an operator reaches for on a bad day: which candidate the
-    // breakers have taken out. Worth a round trip of its own because it comes
-    // from in-memory state, not from the database.
-    for _ in 0..4 {
-        state
-            .engine
-            .record(
-                "claude",
-                "p-ant",
-                kiwanod::strategy::circuit_breaker::AttemptOutcome::Failed,
-                false,
-            )
-            .await;
-    }
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/metrics")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let text = String::from_utf8_lossy(&response_body(response).await).to_string();
-    // Same redaction as above: the series is there (a breaker is open), the
-    // route it names is hashed.
-    assert!(
-        text.contains("kiwano_circuit_open{route=\"") && !text.contains("route=\"claude:p-ant\""),
-        "an open breaker is visible to the scraper: {text}"
-    );
-
     // A scrape is not a request an agent made.
     let (_, total) = state
         .store
@@ -2771,81 +2738,15 @@ async fn a_single_strategy_never_replays_against_the_backup() {
     );
 }
 
-/// A provider whose breaker is open is refused before anything is sent: 503 with
-/// an error kind of its own, not a 502 that would blame an upstream nobody asked.
+/// A key the provider keeps refusing is asked every time, and the refusal
+/// reaches the client as the upstream's own 401 — never as a gateway-invented
+/// refusal that a client would read as "try again".
 ///
-/// This is the half of the breaker that had no effect. Selection treats an open
-/// breaker as "unavailable", but only failover/roundrobin/quota consult it — the
-/// default `single` strategy deliberately looks past it. So the send path is
-/// where an open breaker has to bite, or it is decoration.
+/// This used to be a breaker test: two 401s opened a circuit and the third
+/// request was answered from memory. Nothing is remembered now, so the third
+/// request really is sent, and the 401 the client sees is the vendor's.
 #[tokio::test]
-async fn an_open_breaker_refuses_before_anything_is_sent() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("t.db")).unwrap();
-
-    let (upstream_url, hits) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
-    store
-        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
-        .unwrap();
-    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
-    store
-        .upsert_client_key("kw-ag-claude-test", "claude")
-        .unwrap();
-
-    let state = Arc::new(GatewayState::new(store).unwrap());
-    let app = data_plane_router(state.clone());
-
-    // Open it the way real failures do; the default threshold is four.
-    for _ in 0..4 {
-        state
-            .engine
-            .record(
-                "claude",
-                "p-ant",
-                kiwanod::strategy::circuit_breaker::AttemptOutcome::Failed,
-                false,
-            )
-            .await;
-    }
-
-    let response = post_json(
-        &app,
-        "/v1/messages",
-        Some("kw-ag-claude-test"),
-        r#"{"model":"m"}"#,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert!(
-        hits.lock().unwrap().is_empty(),
-        "the request never reached the upstream"
-    );
-
-    // Audited under its own kind, so "the breaker refused it" stays
-    // distinguishable from "the upstream failed it".
-    let (rows, _) = state
-        .store
-        .list_request_logs(1, 10, RequestLogFilter::default())
-        .unwrap();
-    let row = rows.first().expect("the refusal is audited");
-    assert_eq!(row.error_kind.as_deref(), Some("circuit_open"));
-    assert_eq!(row.agent.as_deref(), Some("claude"));
-    assert_eq!(row.provider_id.as_deref(), Some("p-ant"));
-
-    // Nothing ran, so nothing is billed.
-    assert_eq!(
-        state.store.usage_totals(None, None, None).unwrap().requests,
-        0
-    );
-}
-
-/// Two refused keys open the breaker with the auth-failed mark, and the verdict
-/// lands where users look: the provider's health row says "invalid API key", so
-/// the Apps card's Status column reads "the key" rather than "no answer". The
-/// rate-limit side of the split is pinned at the breaker level; this is the
-/// end-to-end half — a real 401 through the wire, twice.
-#[tokio::test]
-async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
+async fn a_refused_key_is_asked_again_and_the_401_is_the_upstreams_own() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
@@ -2861,7 +2762,7 @@ async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
 
-    for _ in 0..2 {
+    for _ in 0..3 {
         let response = post_json(
             &app,
             "/v1/messages",
@@ -2871,172 +2772,23 @@ async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
         .await;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
-
-    // The third request is refused before it leaves: the key is not going to
-    // start working, and the gateway knows it. What the client is told is the
-    // upstream's own 401 — replayed, not a gateway-invented 503, because a
-    // client that reads "key invalid" stops retrying and one that reads
-    // "circuit open" keeps coming back.
-    let response = post_json(
-        &app,
-        "/v1/messages",
-        Some("kw-ag-claude-test"),
-        r#"{"model":"m"}"#,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(
-        body["error"]["message"], "the upstream refused it",
-        "the replayed body is the upstream's, verbatim: {body}"
-    );
     assert_eq!(
         hits.lock().unwrap().len(),
-        2,
-        "only the two real attempts ran"
+        3,
+        "every request reached the upstream; no refusal was served from memory"
     );
 
-    // The verdict is where the Status column reads it — not just in the log.
-    let health = state
+    // Audited as the upstream's answer, not as a gateway refusal.
+    let (rows, _) = state
         .store
-        .list_provider_health()
-        .unwrap()
-        .into_iter()
-        .find(|h| h.provider_id == "p-ant")
-        .expect("the auth failure wrote a health row");
-    // `status` is reachability — a 401 is the vendor answering — and the key
-    // verdict it refused lives in `error`.
-    assert_eq!(health.status, "reachable");
-    assert_eq!(health.source, "traffic");
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(rows.len(), 3);
     assert!(
-        health
-            .error
-            .as_deref()
-            .unwrap_or("")
-            .contains("invalid API key"),
-        "{:?}",
-        health.error
+        rows.iter()
+            .all(|r| r.error_kind.as_deref() != Some("circuit_open")),
+        "nothing refuses the request gateway-side: {rows:?}"
     );
-
-    // And the machine-readable exit says the same thing.
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/metrics")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body = axum::body::to_bytes(res.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    let text = String::from_utf8(body.to_vec()).unwrap_or_default();
-    assert!(
-        text.contains("kiwano_auth_failed") && text.contains("kiwano_auth_failed{route="),
-        "the auth-failed gauge is missing: {text}"
-    );
-}
-
-/// The replay is per (agent, provider) like the breaker itself: one agent's
-/// refused key must not make another agent's request look refused. A shared
-/// cache would be worse than the 503 this replaced, because it would name a
-/// problem the second agent does not have.
-#[tokio::test]
-async fn the_auth_replay_is_per_agent() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("t.db")).unwrap();
-
-    // One upstream that refuses the first two calls and serves from the third:
-    // a key that is swapped while the breaker is open.
-    let calls = Arc::new(Mutex::new(0u32));
-    let upstream = Router::new()
-        .route(
-            "/v1/messages",
-            post(move || {
-                let calls = calls.clone();
-                async move {
-                    let n = {
-                        let mut c = calls.lock().unwrap();
-                        *c += 1;
-                        *c
-                    };
-                    if n <= 2 {
-                        (
-                            StatusCode::UNAUTHORIZED,
-                            Json(json!({"error": {"message": "invalid x-api-key"}})),
-                        )
-                            .into_response()
-                    } else {
-                        Json(json!({"id":"m","content":[],"usage":{"input_tokens":1,"output_tokens":1}}))
-                            .into_response()
-                    }
-                }
-            }),
-        )
-        .into_make_service_with_connect_info::<std::net::SocketAddr>();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, upstream).await;
-    });
-
-    store
-        .insert_provider(&provider(
-            "p-ant",
-            Protocol::Anthropic,
-            format!("http://{addr}"),
-        ))
-        .unwrap();
-    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
-    // A second agent with its own breaker: it must not inherit the first's 401.
-    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
-    store
-        .upsert_client_key("kw-ag-claude-test", "claude")
-        .unwrap();
-    store
-        .upsert_client_key("kw-ag-codex-test", "codex")
-        .unwrap();
-
-    let state = Arc::new(GatewayState::new(store).unwrap());
-    let app = data_plane_router(state.clone());
-
-    for _ in 0..2 {
-        let r = post_json(
-            &app,
-            "/v1/messages",
-            Some("kw-ag-claude-test"),
-            r#"{"model":"m"}"#,
-        )
-        .await;
-        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-    }
-    // Open now, and the next request replays the upstream's words.
-    let r = post_json(
-        &app,
-        "/v1/messages",
-        Some("kw-ag-claude-test"),
-        r#"{"model":"m"}"#,
-    )
-    .await;
-    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-    let body: Value = serde_json::from_slice(&response_body(r).await).unwrap();
-    assert_eq!(body["error"]["message"], "invalid x-api-key");
-
-    // Another agent's breaker was never opened by claude's key: its request
-    // reaches the (now healthy) upstream rather than inheriting the replay.
-    // (The other half — the cache dying when the key starts working — is pinned
-    // at the breaker, where the recovery can be driven without waiting out the
-    // 60-second open timeout: `the_rejection_body_is_dropped_on_recovery`.)
-    let r = post_json(
-        &app,
-        "/v1/messages",
-        Some("kw-ag-codex-test"),
-        r#"{"model":"m"}"#,
-    )
-    .await;
-    assert_eq!(r.status(), StatusCode::OK);
 }
 
 /// KIW-PRIV-001: `/metrics` outside the key gate, but the identifiers in its

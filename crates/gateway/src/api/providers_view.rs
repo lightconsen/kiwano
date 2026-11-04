@@ -37,9 +37,10 @@ use crate::store::Billing;
 ///
 /// The gateway used to keep a background probe's verdict here (every 30s, one
 /// HTTP request per provider, written to `provider_health`), and the row showed
-/// it as a green dot and a latency. That signal never routed anything — the
-/// breaker, fed by real traffic, is what decides — so it was a continuous
-/// background request per provider for a badge, and it is gone. An enabled
+/// it as a green dot and a latency. That signal never routed anything — routing
+/// reads the billing limits and the bindings, nothing observed from traffic —
+/// so it was a continuous background request per provider for a badge, and it
+/// is gone. An enabled
 /// provider now reads as neutral rather than as healthy, which is the honest
 /// answer to "is it up?" when the way to find out is to ask it: the row's Test
 /// button measures one, and the request log is where failures show up.
@@ -450,9 +451,9 @@ struct ServingMaps {
 
 /// agent → provider ids that would serve a request issued right now under the
 /// active strategy (the "In use" badge). Mirrors the gateway's strategy
-/// selection; its runtime state (breaker health, roundrobin sticky sessions) is
-/// process-local and invisible here, so those two degrade to the deterministic
-/// first choice / full rotation.
+/// selection; its runtime state (roundrobin sticky sessions, least-busy
+/// in-flight counts) is process-local and invisible here, so those two degrade
+/// to the deterministic first choice / full rotation.
 fn serving_maps(
     store: &Store,
     live: &[String],
@@ -504,8 +505,8 @@ fn serving_maps(
             }
             // under threshold → the primary serves; over → the primary does not
             // serve and the first backup is only *first in line*, so it lands in
-            // `fallback` rather than `serving` — the gateway's breakers decide
-            // which backup (if any) actually takes a request, and the UI must
+            // `fallback` rather than `serving` — the gateway picks the backup
+            // per request, and the UI must
             // not claim one it has not observed. "First in line" is not "in use",
             // and the gateway/CLI reader that says "In use" here would guess
             // wrong. The All tab badges it distinctly; agent tabs likewise.
@@ -521,7 +522,7 @@ fn serving_maps(
                     HashSet::from([head])
                 }
             }
-            // single / failover: the head (failover degradation is breaker runtime)
+            // single / failover: the head, always
             _ => HashSet::from([head]),
         };
         maps.serving.insert(agent.clone(), ids);

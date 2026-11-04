@@ -127,8 +127,8 @@ pub struct ProviderVm {
     pub serving_agents: Vec<String>,
     /// Agents for which this provider is the quota strategy's configured first
     /// backup while that agent's primary is over its threshold. Not "in use":
-    /// which backup actually serves depends on the gateway's breakers at
-    /// request time, so the UI badges this as first-in-line instead.
+    /// the backup is only first in line, so the UI badges it as first-in-line
+    /// instead of claiming the request is served here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fallback_agents: Vec<String>,
     pub is_current: bool,
@@ -432,20 +432,6 @@ pub struct ProviderRefVm {
     pub name: String,
     /// `plan` | `payg` | `unl` — the display spelling, not the column's.
     pub billing: String,
-}
-
-/// What a manual circuit reset did — the daemon's answer to the edit dialog's
-/// "reset breaker" button.
-///
-/// `blocked_agents` is the point of the shape: the button's success is only
-/// interesting when something was actually being held back, and "which agents"
-/// is the fact the user can act on. An empty list is a real answer — the
-/// circuits were already closed — rather than a failure.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ResetCircuitVm {
-    /// The agents whose breakers were open and are now closed, sorted.
-    #[serde(default)]
-    pub blocked_agents: Vec<String>,
 }
 
 /// Deserialize a field that is present as `Some`, whatever it holds — `null`

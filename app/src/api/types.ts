@@ -410,8 +410,7 @@ export interface Provider {
   serving_agents: AgentRef[];
   /** Agents for which this provider is the quota strategy's configured first
       backup while that agent's primary is over its threshold. Badged as
-      "Fallback", not "In use": which backup actually serves depends on the
-      gateway's breakers at request time. */
+      "Fallback", not "In use": it is first in line, not observed serving. */
   fallback_agents?: AgentRef[];
   /** Collapsed across agents (the All tab badge); agent tabs use serving_agents */
   is_current: boolean;
@@ -938,14 +937,6 @@ export interface PromptLatency {
   error: string | null;
 }
 
-/** What a manual circuit reset did (the edit dialog's Reset breaker button).
-    The breaker is the daemon's memory, not a column, so this is the only way
-    to close one before its own timeout. */
-export interface ResetCircuit {
-  /** The agents whose breakers were open and are now closed, sorted. Empty
-      means nothing was being held back — a real answer, not a failure. */
-  blocked_agents: string[];
-}
 
 export interface AgentDetect {
   agent: AgentId;
@@ -1133,11 +1124,6 @@ export interface KiwanoApi {
   testLatency(endpoint: string): Promise<number>;
   /** Send one prompt through a stored provider and time the round trip */
   testProviderLatency(id: string): Promise<PromptLatency>;
-  /** Close this provider's circuit breakers by hand, one per agent that routes
-      to it. The breaker lives in the gateway's memory, fed by real traffic —
-      waiting out its timeout is the only alternative, and the wait is invisible
-      from the UI. Answers which agents were actually being held back. */
-  resetProviderCircuit(id: string): Promise<ResetCircuit>;
   /** Protocol-aware probe: GET the protocol's models route; 401/403 still
       proves the protocol route exists (works without a key) */
   /** Probe the endpoint. A blank key is fine — a 401 still proves the route

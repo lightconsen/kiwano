@@ -130,16 +130,6 @@ export const addProvider = {
   removeHeader: "ヘッダーを削除",
   addHeader: "ヘッダーを追加",
 
-  // ── 手動サーキットリセット（編集時のみ）──
-  resetCircuit: "サーキットブレーカー",
-  resetCircuitAction: "ブレーカーをリセット",
-  resetCircuitBusy: "リセット中…",
-  resetCircuitHint:
-    "ここにルーティングされているすべてのエージェントで閉じます。タイムアウトを待たずにすぐ通ります。プロバイダー自体の設定は何も変わりません。",
-  resetCircuitNone: "遮断されていたものはありません — すべてのサーキットはすでに閉じていました。",
-  resetCircuitDone: "閉じました — {agents} が再び送信できます。",
-  resetCircuitFailed: "リセットできませんでした：{detail}",
-
   // ── Footer ──
   saving: "保存中…",
   saveEnable: "保存して有効化",

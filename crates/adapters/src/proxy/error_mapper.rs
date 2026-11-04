@@ -1,7 +1,9 @@
 // This file is derived from cc-switch (https://github.com/farion1231/cc-switch),
 // licensed under the MIT License.
 // Source: src-tauri/src/proxy/error_mapper.rs
-// Copied on 2026-09-07. Modified for Kiwano (unchanged; the trimmed local ProxyError keeps the same variant names).
+// Copied on 2026-09-07. Modified for Kiwano (the trimmed local ProxyError
+// keeps the same variant names, minus `AllProvidersCircuitOpen`, dropped on
+// 2026-11-04 with the gateway's circuit breaker).
 
 //! Mapping of error types to HTTP status codes
 //!
@@ -39,9 +41,6 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
 
         // No available provider: 503 Service Unavailable
         ProxyError::NoAvailableProvider => 503,
-
-        // All providers circuit-open: 503 Service Unavailable
-        ProxyError::AllProvidersCircuitOpen => 503,
 
         // No providers configured: 503 Service Unavailable
         ProxyError::NoProvidersConfigured => 503,
@@ -82,9 +81,6 @@ pub fn get_error_message(error: &ProxyError) -> String {
         ProxyError::Timeout(msg) => format!("request timed out: {msg}"),
         ProxyError::ForwardFailed(msg) => format!("cannot forward: {msg}"),
         ProxyError::NoAvailableProvider => "no provider available".to_string(),
-        ProxyError::AllProvidersCircuitOpen => {
-            "every provider is circuit-broken; no channel is left".to_string()
-        }
         ProxyError::NoProvidersConfigured => "no provider is configured".to_string(),
         ProxyError::MaxRetriesExceeded => {
             "every provider failed and the retries are spent".to_string()

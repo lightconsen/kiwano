@@ -33,7 +33,6 @@ export const app = {
   // Typed gateway events
   notifyDlpTitle: "Kiwano 認証情報の監視",
   notifyLimitTitle: "Kiwano 上限に達しました",
-  notifyAuthTitle: "Kiwano: プロバイダーのキーが無効です",
 
   // Billing chips
   billing: {

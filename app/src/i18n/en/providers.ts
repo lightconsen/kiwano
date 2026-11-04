@@ -33,8 +33,8 @@ export const providers = {
   unbound: "Unbound",
   inUse: "In use",
   /** The quota strategy's first backup, once the primary is over its threshold.
-      Not "In use": which backup actually serves is decided by the gateway's
-      breakers at request time, so the honest claim is about the config. */
+      Not "In use": the backup is only first in line, so the honest claim is
+      about the config. */
   quotaFallback: "Fallback",
   quotaFallbackTitle:
     "First in line once the primary passes its quota — which backup actually serves depends on the others still being reachable",

@@ -17,8 +17,8 @@
 //! number was already on screen.
 //!
 //! The verdict is written to `provider_health` (migration v21) and read by the
-//! Apps screen. It routes nothing: selection is the circuit breaker's job, fed by
-//! real traffic — the honest signal for "should this request go here".
+//! Apps screen. It routes nothing: selection reads the bindings and the billing
+//! limits, never a verdict from this loop.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

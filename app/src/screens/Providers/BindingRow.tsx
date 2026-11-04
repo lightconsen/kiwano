@@ -256,8 +256,7 @@ export function BindingRow({
   const unbind = () => api.removeAgentBinding(route.agent, b.provider_id).then(onChanged);
 
   // Local "In use": serving this agent right now, not merely any agent. A
-  // quota-over first backup reads as fallback instead — first in line, which
-  // only the gateway's breakers can promote to serving.
+  // quota-over first backup reads as fallback instead — first in line.
   const inUse = p.serving_agents.includes(route.agent);
   const isFallback = p.fallback_agents?.includes(route.agent) === true;
   const state = rowState(p, inUse, blocked);

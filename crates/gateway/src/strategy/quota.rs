@@ -152,11 +152,9 @@ impl StrategyEngine {
             limit = cfg.limit,
             "quota threshold reached; new sessions go to the backups"
         );
-        for i in 1..route.candidates.len() {
-            if self.candidate_available(route, i).await {
-                self.assign_drained(route, session, &route.candidates[i]);
-                return Ok(route.candidates[i].clone());
-            }
+        if let Some(backup) = route.candidates.get(1) {
+            self.assign_drained(route, session, backup);
+            return Ok(backup.clone());
         }
         let primary = Self::primary(route)?;
         self.assign_drained(route, session, &primary);

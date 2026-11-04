@@ -21,8 +21,8 @@
 # Usage: scripts/burn-quota.sh <agent> [rounds]
 #   agent  — one of the built-ins below, or any other headless CLI via
 #            BURN_CMD='your cmd with {prompt}'
-#   rounds — number of prompts to fire (default 1000; the failure circuit
-#            breaker usually ends the run before that)
+#   rounds — number of prompts to fire (default 1000; the failures usually
+#            end the run before that)
 #
 # Built-in agents (their known single-shot modes):
 #   claude · codex · gemini · qwen · opencode · kimi · crush · droid ·
@@ -60,10 +60,10 @@ cache_preamble() {
     local need=$((CACHE_KB * 128)) # 1 KB ≈ 256 tokens ≈ 128 space-separated words
     awk -v need="$need" 'BEGIN {
         srand(42); # fixed seed: the preamble must be byte-identical across rounds
-        split("gateway routing metering latency provider strategy token cache quota model agent session circuit breaker fallback health check", words, " ");
+        split("gateway routing metering latency provider strategy token cache quota model agent session budget spread fallback health check", words, " ");
         line = "";
         while (need-- > 0) {
-            line = line words[int(rand() * 28 + 1)] " ";
+            line = line words[int(rand() * length(words) + 1)] " ";
             if (need % 12 == 0) { print line; line = "" }
         }
         if (line != "") print line;

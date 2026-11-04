@@ -28,7 +28,6 @@ export const app = {
   // Typed gateway events (pushed over /events; the tray entry is the click)
   notifyDlpTitle: "Kiwano 憑證監控",
   notifyLimitTitle: "Kiwano 已達限額",
-  notifyAuthTitle: "Kiwano：Provider 金鑰無效",
 
   billing: {
     payg: "PAYG",

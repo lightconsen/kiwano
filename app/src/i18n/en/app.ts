@@ -44,7 +44,6 @@ export const app = {
   // Typed gateway events (pushed over /events; the tray entry is the click)
   notifyDlpTitle: "Kiwano credential watch",
   notifyLimitTitle: "Kiwano limit reached",
-  notifyAuthTitle: "Kiwano: provider key invalid",
 
   // Billing chips (components/bits.tsx)
   billing: {

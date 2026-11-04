@@ -14,12 +14,6 @@ use crate::log_capture::RequestCapture;
 use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::{error_into_response, GatewayState};
 use crate::store::Protocol;
-use crate::strategy::circuit_breaker::AttemptOutcome;
-
-/// The pause a 429 asks for when the upstream did not name one: short, on the
-/// theory that the next attempt is cheap and the window may already have
-/// moved — the upstream's own Retry-After outranks this whenever it speaks.
-pub(crate) const RATE_LIMIT_DEFAULT_COOLDOWN: Duration = Duration::from_secs(5);
 
 /// Whether an upstream status means "this provider did not serve it": request
 /// timeout, rate limiting, and server-side errors. Client errors (4xx besides
@@ -172,23 +166,7 @@ pub(crate) async fn read_body_or_response(
     inbound: Option<Protocol>,
 ) -> Result<Bytes, Response> {
     match read_upstream_body_capped(upstream, MAX_UPSTREAM_BODY_BYTES).await {
-        Ok(b) => {
-            // A 401's body is the reason the key was refused. Keep it so a
-            // breaker that opens on auth can replay the upstream's own answer
-            // while it refuses to send — the client then sees "invalid key",
-            // not a gateway-invented "circuit open" it would retry against.
-            if upstream.status() == StatusCode::UNAUTHORIZED {
-                state
-                    .engine
-                    .note_auth_rejection_body(
-                        &routed.agent,
-                        &provider.id,
-                        String::from_utf8_lossy(&b).into_owned(),
-                    )
-                    .await;
-            }
-            Ok(b)
-        }
+        Ok(b) => Ok(b),
         Err(e) => {
             let resp =
                 error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
@@ -342,14 +320,11 @@ impl SendFailure {
 /// streams. Wrapping `send()` bounds only time-to-response-headers; body
 /// reads stay under the client-wide 300s read timeout.
 ///
-/// Each attempt asks the breaker for admission and records its feedback exactly
-/// once (success is judged at response-header time, tech.md §4.7). A retryable
-/// outcome (transport error, 408/429/5xx) with attempts left backs off briefly
-/// and re-sends the same request to the same provider; the strategy layer only
-/// takes over after this loop gives up. The loop returns before any byte
-/// reaches the client, so in-flight streams are never retried; body-read
-/// failures after headers are also not retried (the breaker was already fed at
-/// header time).
+/// A retryable outcome (transport error, 408/429/5xx) with attempts left backs
+/// off briefly and re-sends the same request to the same provider; the strategy
+/// layer only takes over after this loop gives up. The loop returns before any
+/// byte reaches the client, so in-flight streams are never retried; body-read
+/// failures after headers are also not retried.
 #[allow(clippy::too_many_arguments)] // every argument is a distinct routing input
 #[allow(clippy::result_large_err)] // Err is the client-facing response, not a diagnostic
 pub(crate) async fn send_upstream(
@@ -370,58 +345,6 @@ pub(crate) async fn send_upstream(
     let started = Instant::now();
     for attempt in 1..=attempts {
         let last = attempt == attempts;
-        // Admission is asked per attempt, not once per request: in HalfOpen the
-        // breaker hands out a single probe permit, and a probe that has already
-        // failed re-opened the circuit — sending the retry would be a second
-        // probe the breaker never granted. Closed admits everything, so this is
-        // free on the ordinary path.
-        let admission = state.engine.allow(agent, &provider.id).await;
-        if !admission.allowed {
-            // A breaker that opened on auth has a better answer than "circuit
-            // open": the 401 the upstream already gave. Replaying it keeps the
-            // refusal honest — the client sees the key is bad, in the shape the
-            // upstream used — and a refusal that names its reason is one an
-            // agent stops retrying, which the 503 this replaces did not.
-            if let Some(body) = state.engine.auth_rejection_body(agent, &provider.id).await {
-                crate::log_capture::persist_failure(
-                    &state.store,
-                    capture,
-                    Some(agent.to_string()),
-                    Some(attribution.to_string()),
-                    Some(provider.id.clone()),
-                    StatusCode::UNAUTHORIZED,
-                    "auth_rejected",
-                    "replaying the upstream's 401 while the key is known bad".to_string(),
-                );
-                let mut resp = Response::new(axum::body::Body::from(body));
-                *resp.status_mut() = StatusCode::UNAUTHORIZED;
-                resp.headers_mut().insert(
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::HeaderValue::from_static("application/json"),
-                );
-                return Err(resp);
-            }
-            // Not recorded as a failure: nothing was attempted, and a denial
-            // counted as a failure would drive the breaker further open on its
-            // own refusals.
-            let circuit = GatewayError::CircuitOpen {
-                agent: agent.to_string(),
-                provider: provider.id.clone(),
-            };
-            let message = circuit.to_string();
-            let resp = error_into_response(circuit, inbound);
-            crate::log_capture::persist_failure(
-                &state.store,
-                capture,
-                Some(agent.to_string()),
-                Some(attribution.to_string()),
-                Some(provider.id.clone()),
-                resp.status(),
-                "circuit_open",
-                message,
-            );
-            return Err(resp);
-        }
         // Timed per attempt, not per request: what a retry cost in wall-clock
         // terms is the number that makes a flaky upstream visible.
         let attempt_started = Instant::now();
@@ -464,54 +387,6 @@ pub(crate) async fn send_upstream(
         match outcome {
             Ok(upstream) => {
                 let status = upstream.status();
-                // The outcome decides which counter the attempt feeds — a 429
-                // is the provider asking for a pause (never a failure), a 401
-                // is a key the provider refuses (counted on its own), and the
-                // rest are the failures the breaker exists for. The 429's
-                // cooldown comes from the upstream's own Retry-After when it
-                // names one, else the short default.
-                let outcome = if status.is_success() {
-                    AttemptOutcome::Served
-                } else if status == StatusCode::TOO_MANY_REQUESTS {
-                    AttemptOutcome::RateLimited {
-                        cooldown: retry_after_secs(&upstream)
-                            .unwrap_or(RATE_LIMIT_DEFAULT_COOLDOWN),
-                    }
-                } else if status == StatusCode::UNAUTHORIZED {
-                    AttemptOutcome::AuthRejected
-                } else {
-                    AttemptOutcome::Failed
-                };
-                let auth_failed_now = state
-                    .engine
-                    .record(
-                        agent,
-                        &provider.id,
-                        outcome,
-                        admission.used_half_open_permit,
-                    )
-                    .await;
-                if auth_failed_now {
-                    // The threshold just tripped: tell the app (notification +
-                    // tray entry), and say so where users look. The Status
-                    // column reads this row — `status` is a *reachability*
-                    // verdict (a 401 is the vendor answering, so "reachable"),
-                    // and `error` carries the key verdict it refused to accept.
-                    // `traffic` distinguishes this from the key-less prober's.
-                    state.notify_event(crate::server::GatewayEvent::AuthFailed {
-                        agent: agent.to_string(),
-                        provider_id: provider.id.clone(),
-                    });
-                    if let Err(e) = state.store.upsert_provider_health(
-                        &provider.id,
-                        "reachable",
-                        attempt_started.elapsed().as_millis() as i64,
-                        "traffic",
-                        Some("invalid API key (401)"),
-                    ) {
-                        tracing::warn!(provider = %provider.id, error = %e, "failed to persist auth failure");
-                    }
-                }
                 if !last && is_retryable_status(status) {
                     // The upstream knows its own rate-limit window: a numeric
                     // Retry-After outranks the plain backoff. A window longer
@@ -568,15 +443,6 @@ pub(crate) async fn send_upstream(
             }
             Err(failure) => {
                 let message = failure.message(url);
-                state
-                    .engine
-                    .record(
-                        agent,
-                        &provider.id,
-                        AttemptOutcome::Failed,
-                        admission.used_half_open_permit,
-                    )
-                    .await;
                 if !last {
                     let delay = backoff_delay(attempt);
                     if !budget_left(started, delay) {

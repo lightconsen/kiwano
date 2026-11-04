@@ -15,11 +15,11 @@ and the strategy picker above.*
 | Strategy | Picks | Notes |
 | --- | --- | --- |
 | `single` | The primary, always. | The default. One provider, no replay tail — but an agent over its own spend ceiling is refused under every strategy, `single` included. |
-| `failover` | The first breaker-available candidate in priority order. | When every breaker is open, the primary is tried anyway. A 429 sets the short pause the provider named; a 500 counts toward the breaker. |
+| `failover` | The first candidate, in priority order. | A failed attempt is replayed against the next candidate in the same order; a provider that failed is still the head of the next request. |
 | `roundrobin` | Weighted rotation — **per session**. | A conversation keeps its provider so the upstream prompt cache it already paid for keeps being hit; new sessions pick by weight; a session is reassigned only when its sticky candidate goes unavailable. |
 | `timewindow` | The candidate whose local `HH:MM` window (windows may cross midnight) contains now. | Falls back to the primary when nothing matches. Same session stickiness as `roundrobin`. |
 | `quota` | The primary until its same-day usage (requests or tokens, read from the usage aggregates) passes the threshold in the strategy config, then the backups, failover-style. | Same session stickiness: a switch applies to the *next* conversation. |
-| `least-busy` | The breaker-available candidate with the fewest requests currently in flight. | Sessions drain first (like the other sticky strategies); priority order breaks ties. |
+| `least-busy` | The candidate with the fewest requests currently in flight. | Sessions drain first (like the other sticky strategies); priority order breaks ties. |
 
 Two properties hold across all of them:
 
@@ -77,23 +77,14 @@ so what the header says is what the ledger records. A request the gateway
 itself refused — a spend ceiling, a client key's policy — carries no receipt:
 nothing served it.
 
-## When a provider takes itself out: the breaker
+## What takes a provider out of a route
 
-Each provider gets a **circuit breaker per agent**: after four consecutive
-failures (or a 60% error rate over ten requests) it opens and that agent stops
-being sent there, until a 60-second timeout lets one probe through. Two
-consecutive auth rejections open it the same way, and while it is open the
-gateway replays the upstream's own 401 instead of spending a request on a key
-known to be refused.
-
-The breaker lives in the running daemon's memory, not in the provider's row —
-which is why recovery is a button rather than an edit. Fixing a bad key or a
-broken proxy does not clear it: the breaker has no idea anything changed, and
-the timeout is the only thing that would close it. **Reset breaker** in that
-provider's Advanced section, or `kiwano providers reset-circuit <ID>`, closes it
-for every agent routed there and names the ones that were actually being held
-back. Nothing about the provider's configuration changes, so it is not part of
-the save: it takes effect the moment you press it.
+Only two things, and both are the user's: a **billing limit** the provider has
+spent past, or parking it with `kiwano providers disable`. Neither is
+remembered from traffic. A provider that fails is retried and then failed over
+within the same request, and the next request goes to it again — nothing holds
+a grudge, so a vendor outage that ends, or a key you have just replaced, is
+used again immediately rather than waiting out a clock.
 
 ## Spend ceilings (agent limits)
 

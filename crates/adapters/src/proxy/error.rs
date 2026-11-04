@@ -4,7 +4,8 @@
 // Copied on 2026-09-07. Modified for Kiwano (kept as a lightweight conversion
 // error: the axum `IntoResponse` impl and the reqwest-based `categorize_error`
 // helper were dropped; variant names preserved so error_mapper.rs stays
-// unchanged).
+// unchanged). `AllProvidersCircuitOpen` was dropped on 2026-11-04 with the
+// gateway's circuit breaker — nothing can construct it any more.
 
 use thiserror::Error;
 
@@ -33,9 +34,6 @@ pub enum ProxyError {
 
     #[error("no provider available")]
     NoAvailableProvider,
-
-    #[error("every provider is circuit-broken; no channel is left")]
-    AllProvidersCircuitOpen,
 
     #[error("no provider is configured")]
     NoProvidersConfigured,
@@ -109,7 +107,6 @@ mod tests {
             ProxyError::StopFailed("x".into()),
             ProxyError::ForwardFailed("x".into()),
             ProxyError::NoAvailableProvider,
-            ProxyError::AllProvidersCircuitOpen,
             ProxyError::NoProvidersConfigured,
             ProxyError::ProviderUnhealthy("x".into()),
             ProxyError::MaxRetriesExceeded,

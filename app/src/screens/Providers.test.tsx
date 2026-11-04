@@ -1949,9 +1949,8 @@ describe("a usage cell whose numbers moved", () => {
 });
 
 // The quota strategy's over-threshold state: the configured first backup is
-// *first in line*, not in use — which backup actually serves depends on the
-// gateway's breakers at request time, so the badge is a config claim with a
-// different mark ("Fallback") and the over-threshold primary claims nothing.
+// *first in line*, not in use — so the badge is a config claim with a different
+// mark ("Fallback") and the over-threshold primary claims nothing.
 describe("the quota fallback badge", () => {
   const over = () => [
     deepseek({

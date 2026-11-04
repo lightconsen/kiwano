@@ -11,20 +11,21 @@
 //!   read out of that store cannot report that the store is broken. Prometheus
 //!   scrapes over TCP, and the admin plane — where `/status` already lives — is a
 //!   unix socket, which no ordinary scraper can reach.
-//! - What they expose is counts, breaker states and a version. Never a key, never
+//! - What they expose is counts, route sizes and a version. Never a key, never
 //!   a request body, never anything that lets a caller spend the operator's
 //!   money — which is the threat the key gate exists for (a local process posting
 //!   on the operator's upstream credentials).
 //!
 //! The one thing a same-user process could abuse is the identifiers in the
-//! labels: which agents are routed, to which route a breaker is open. That is
-//! the machine owner's own screen content, but it does not need to be handed to
-//! any process that can reach the loopback. So `/metrics` serves per-identity
-//! labels **redacted by default** ([`redact_name`]) — a scrape still tells one
-//! agent from another without naming it. Configuring `KIWANO_METRICS_TOKEN`
-//! turns the key gate on instead: the endpoint answers with the full
-//! exposition only to a caller bearing the token, and 401s everyone else.
-//! `/health` never carries identifiers, so it is unchanged either way.
+//! labels: which agents are routed, and how many providers each one can reach.
+//! That is the machine owner's own screen content, but it does not need to be
+//! handed to any process that can reach the loopback. So `/metrics` serves
+//! per-identity labels **redacted by default** ([`redact_name`]) — a scrape still
+//! tells one agent from another without naming it. Configuring
+//! `KIWANO_METRICS_TOKEN` turns the key gate on instead: the endpoint answers
+//! with the full exposition only to a caller bearing the token, and 401s
+//! everyone else. `/health` never carries identifiers, so it is unchanged
+//! either way.
 //!
 //! Neither is metered or logged: a scrape is not a request an agent made, and a
 //! usage row per scrape interval would quietly inflate the dashboard.
@@ -36,7 +37,6 @@ use axum::Json;
 use sha2::{Digest, Sha256};
 
 use crate::server::GatewayState;
-use crate::strategy::circuit_breaker::CircuitState;
 
 /// Can the gateway serve a request? Deliberately narrow: it is about the parts
 /// that answer one — the store it reads its configuration from — and about
@@ -118,24 +118,9 @@ pub async fn prometheus(state: &GatewayState, redact: bool) -> String {
         ));
     }
 
-    // The signal this endpoint earns its keep on: which candidates the breakers
-    // have taken out of the pool, per agent — and whether the reason is a dead
-    // provider or a key the provider keeps refusing.
-    out.push_str("# HELP kiwano_circuit_open 1 while a provider's breaker is open\n");
-    out.push_str("# TYPE kiwano_circuit_open gauge\n");
-    out.push_str("# HELP kiwano_auth_failed 1 while a provider's key is being refused (401)\n");
-    out.push_str("# TYPE kiwano_auth_failed gauge\n");
-    for snap in state.engine.breaker_snapshot().await {
-        let label = redact_label(&snap.key, redact);
-        out.push_str(&format!(
-            "kiwano_circuit_open{{route=\"{label}\"}} {}\n",
-            u8::from(snap.state == CircuitState::Open)
-        ));
-        out.push_str(&format!(
-            "kiwano_auth_failed{{route=\"{label}\"}} {}\n",
-            u8::from(snap.auth_failed)
-        ));
-    }
+    // Which candidates each routed agent can reach. There is no breaker gauge
+    // any more: nothing on this plane takes a healthy provider out of the pool,
+    // so the candidate count is the whole of what the route table can say.
 
     if let Ok(totals) = state.store.usage_totals(None, None, None) {
         out.push_str("# HELP kiwano_usage_rows Metered requests held\n");

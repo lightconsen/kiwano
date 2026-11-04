@@ -111,7 +111,6 @@ kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
 kiwano providers edit <ID> [any of the above]
 kiwano providers use <ID> --agent AGENT      switch an agent, forcing single strategy
 kiwano providers enable <ID>                 make it the current route, keeping the strategy
-kiwano providers reset-circuit <ID>          close its breaker for every agent routed to it
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers price <ID> --model M --input X --output Y
@@ -196,13 +195,6 @@ key, it does not blank it.
 silently drops the value otherwise, and a flag that does nothing is worse than
 one that refuses). `--plan-query` is what makes `providers quota` able to ask
 anything at all.
-
-`providers reset-circuit` is the one provider command that changes nothing
-about the provider. The breaker is the running daemon's memory — four
-consecutive failures close a provider to an agent for a minute — so a key or a
-proxy you have just fixed is still refused until that minute runs out. This
-closes every breaker the provider has and prints the agents that were actually
-being held back, which is the part no config edit could tell you.
 
 `--unit` says what a `--limit` counts: `requests`, `wan_tokens`, or a currency the
 Hub publishes a rate for. That last one is checked rather than stored, and exits 2
@@ -589,7 +581,6 @@ self-update).
 | Gateway status + today's totals | `status` |
 | Provider list / add / edit / delete | `providers list\|add\|edit\|remove` |
 | Make a provider current | `providers enable`, `providers use` |
-| Reset a provider's circuit breaker | `providers reset-circuit`, or **Reset breaker** in its edit dialog |
 | Latency / endpoint / model probes | `providers probe …` |
 | Plan quota rings | `providers quota` |
 | Rotating API keys | `keys list\|add\|remove` |

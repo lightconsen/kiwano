@@ -12,7 +12,7 @@ use crate::router::AgentRoute;
 use super::StrategyEngine;
 
 impl StrategyEngine {
-    /// roundrobin: session-granularity stickiness + weighting. Reassigns when the sticky candidate is unavailable (breaker open).
+    /// roundrobin: session-granularity stickiness + weighting.
     pub(crate) async fn select_roundrobin(
         &self,
         route: &AgentRoute,
@@ -31,8 +31,8 @@ impl StrategyEngine {
         Ok(chosen)
     }
 
-    /// Weighted ring: next available candidate index (weights expanded into a ring by gcd, the lock
-    /// only guards cursor reads/writes and never crosses await); returns 0 (primary fallback) when none is available.
+    /// Weighted ring: next candidate index (weights expanded into a ring by
+    /// gcd, the lock only guards cursor reads/writes and never crosses await).
     pub(crate) async fn weighted_next(&self, route: &AgentRoute) -> Result<usize> {
         fn gcd(a: i64, b: i64) -> i64 {
             if b == 0 {
@@ -49,18 +49,10 @@ impl StrategyEngine {
             .flat_map(|(i, w)| std::iter::repeat_n(i, (*w / g) as usize))
             .collect();
         let ring_len = ring.len().max(1) as u64;
-        for _ in 0..ring_len {
-            let idx = {
-                let mut cursor = self.cursor.lock().expect("cursor poisoned");
-                let idx = ring[(*cursor % ring_len) as usize];
-                *cursor += 1;
-                idx
-            };
-            if self.candidate_available(route, idx).await {
-                return Ok(idx);
-            }
-        }
-        Ok(0)
+        let mut cursor = self.cursor.lock().expect("cursor poisoned");
+        let idx = ring[(*cursor % ring_len) as usize];
+        *cursor += 1;
+        Ok(idx)
     }
 }
 
@@ -69,7 +61,7 @@ mod tests {
     use super::*;
     use crate::store::StrategyType;
     use crate::strategy::sticky::STICKY_CAPACITY;
-    use crate::strategy::test_support::{candidate, route, store};
+    use crate::strategy::test_support::{blocked, candidate, route, store};
 
     #[tokio::test]
     async fn roundrobin_is_sticky_per_session_and_weighted_across() {
@@ -182,8 +174,11 @@ mod tests {
         );
     }
 
+    /// A session pinned to a provider that is now over a billing limit is
+    /// reassigned: the ceiling wins over the conversation's cache, and the
+    /// pruned candidate list no longer contains the pinned id at all.
     #[tokio::test]
-    async fn roundrobin_reassigns_when_sticky_candidate_opens() {
+    async fn roundrobin_reassigns_when_the_sticky_candidate_is_blocked() {
         let engine = StrategyEngine::new();
         let s = store();
         let r = route(
@@ -196,19 +191,9 @@ mod tests {
             .unwrap()
             .id;
 
-        // Sticky candidate trips its breaker → same session is reassigned to another
-        for _ in 0..4 {
-            engine
-                .record(
-                    "claude",
-                    &sticky,
-                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
-                    false,
-                )
-                .await;
-        }
+        // The pinned provider goes over its limit → same session is reassigned.
         let reassigned = engine
-            .select(&s, &r, Some("s"), &crate::limits::LimitState::default())
+            .select(&s, &r, Some("s"), &blocked(&sticky))
             .await
             .unwrap()
             .id;

@@ -83,6 +83,15 @@ pub struct ProviderVm {
     pub logo_color: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logo_border: bool,
+    /// The Hub-hosted brand mark of this provider's catalog entry, as an
+    /// absolute URL — the shelf's own `logo` resolved against `hub_url`, so the
+    /// app renders the picture the catalog publishes instead of guessing one
+    /// from the endpoint host. Absent when the provider matches no entry (a
+    /// self-hosted relay, a vendor the Hub does not list) or when the entry
+    /// carries no logo; the app then infers a mark from the endpoint and, failing
+    /// that, falls back to the letter avatar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_logo: Option<String>,
     /// The catalog entry this provider was added from, when it came from the
     /// shelf. The dialog needs it to reach the entry again: the entry is the
     /// authority on the endpoints the provider answers on and on the currency it

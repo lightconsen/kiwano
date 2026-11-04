@@ -26,7 +26,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::catalog::{catalog_snapshot, CatalogEntryVm};
 use super::views::{
-    advanced_vm, billing_to_ui, display_endpoint, endpoint_note, provider_currency, vm_endpoints,
+    advanced_vm, billing_to_ui, catalog_logo, display_endpoint, endpoint_note, provider_currency,
+    vm_endpoints,
 };
 use crate::store::time::{
     day_key, in_window, local_day_start, local_minutes_now, rfc3339_from_unix, unix_now,
@@ -361,8 +362,12 @@ fn build_rows(store: &Store, live: &[String]) -> Result<Vec<ProviderVm>, ApiErro
         return Ok(Vec::new());
     }
 
-    // What each provider bills in, resolved per row below.
+    // What each provider bills in, and the brand mark it borrows from its
+    // entry — both resolved per row below.
     let catalog_entries = catalog_snapshot(store).entries;
+    let hub_url = store
+        .ui_hub_url()
+        .unwrap_or_else(|| crate::api::sync::DEFAULT_HUB_URL.to_string());
 
     let now = unix_now();
     // The 7-day window both this page and the Dashboard's "Last 7 days" chart
@@ -390,6 +395,7 @@ fn build_rows(store: &Store, live: &[String]) -> Result<Vec<ProviderVm>, ApiErro
     let ctx = ProviderViewCtx {
         store,
         catalog_entries: &catalog_entries,
+        hub_url: &hub_url,
         since_day: &since_day,
         since7: &since7,
         tz,
@@ -640,6 +646,8 @@ fn badge_set(
 struct ProviderViewCtx<'a> {
     store: &'a Store,
     catalog_entries: &'a [CatalogEntryVm],
+    /// The Hub's base URL, for resolving a linked catalog entry's logo path.
+    hub_url: &'a str,
     since_day: &'a str,
     since7: &'a str,
     /// The user's UTC offset and the local day index today sits on — what the
@@ -678,6 +686,7 @@ fn provider_vm(ctx: &ProviderViewCtx, p: Provider, badges: BadgeSet) -> Provider
         logo_char: logo_char(&p.name),
         logo_color: palette_color(&p.name).to_string(),
         logo_border: false,
+        catalog_logo: catalog_logo(&p, ctx.catalog_entries, ctx.hub_url),
         catalog_id: p.catalog_id.clone(),
         currency: provider_currency(&p, ctx.catalog_entries),
         endpoint: display_endpoint(&p),

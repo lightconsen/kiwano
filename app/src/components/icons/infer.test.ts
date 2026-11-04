@@ -11,6 +11,12 @@ describe("iconForEndpoint", () => {
     expect(iconForEndpoint("api.openai.com")).toBe("openai");
   });
 
+  it("names a vendor whose endpoint is its own domain", () => {
+    // Command Code serves its provider API from a subdomain of its own site.
+    expect(iconForEndpoint("https://api.commandcode.ai/provider/v1")).toBe("commandcode");
+    expect(iconForEndpoint("https://api.commandcode.ai/provider")).toBe("commandcode");
+  });
+
   it("reads a local server's brand out of its default port", () => {
     // Every local server is "localhost", so the port is the only signal there
     // is — and 11434 is Ollama's own.

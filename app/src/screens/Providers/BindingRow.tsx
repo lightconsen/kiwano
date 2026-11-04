@@ -5,8 +5,7 @@ import { useEffect, useState, type FocusEvent } from "react";
 import { ArrowDown, ArrowUp, Pin, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ProviderLogo } from "@/components/icons/ProviderLogo";
-import { iconForEndpoint } from "@/components/icons/infer";
+import { ProviderMark } from "@/components/icons/ProviderMark";
 import {
   Select,
   SelectContent,
@@ -376,15 +375,12 @@ export function BindProviderSelect({
         />
       </SelectTrigger>
       <SelectContent className="min-w-[220px]">
-        {available.map((p) => {
-          const icon = iconForEndpoint(p.endpoint);
-          return (
-            <SelectItem key={p.id} value={p.id} className="text-[12px]">
-              {icon && <ProviderLogo icon={icon} name={p.name} size={14} />}
-              {p.name}
-            </SelectItem>
-          );
-        })}
+        {available.map((p) => (
+          <SelectItem key={p.id} value={p.id} className="text-[12px]">
+            <ProviderMark provider={p} size={14} />
+            {p.name}
+          </SelectItem>
+        ))}
       </SelectContent>
     </Select>
   );

@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 
 import { ChevronRight, Gauge, Pause, Play, RefreshCw, SquarePen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ProviderLogo } from "@/components/icons/ProviderLogo";
-import { iconForEndpoint } from "@/components/icons/infer";
+import { ProviderMark } from "@/components/icons/ProviderMark";
 import { api } from "../../api/client";
 import { useT, type Translate } from "../../i18n";
-import { AgentChip, Dot, Logo } from "../../components/bits";
+import { AgentChip, Dot } from "../../components/bits";
 import { agentMeta } from "../../lib/agents";
 import { fmtLatency } from "../../lib/format";
 import { type AgentRoute, type PlanQuotaReport, type Provider } from "../../api/types";
@@ -139,8 +138,6 @@ export function TestLatencyButton({
     "In use" and must not share its mark. */
 export function IdentityCell({ p, inUse, isFallback }: { p: Provider; inUse?: boolean; isFallback?: boolean }) {
   const t = useT();
-  // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
-  const brandIcon = iconForEndpoint(p.endpoint);
   // Per agent the two claims are disjoint, but the All tab collapses them, and
   // a provider can serve one agent while standing first-in-line for another:
   // "In use" is the stronger claim, so it wins the one badge slot.
@@ -148,11 +145,9 @@ export function IdentityCell({ p, inUse, isFallback }: { p: Provider; inUse?: bo
   const showFallback = isFallback === true && !showInUse;
   return (
     <div className="flex min-w-0 w-[31%] items-center gap-2.5">
-      {brandIcon ? (
-        <ProviderLogo icon={brandIcon} name={p.name} size={32} />
-      ) : (
-        <Logo char={p.logo_char} color={p.logo_color} border={p.logo_border} />
-      )}
+      {/* The catalog's own logo first, then the endpoint's brand, then the
+          letter: see `ProviderMark`. */}
+      <ProviderMark provider={p} size={32} />
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-[13px] font-semibold">{p.name}</span>

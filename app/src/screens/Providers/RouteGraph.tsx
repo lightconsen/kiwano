@@ -23,7 +23,7 @@ import { useT, type KeyPath, type Messages } from "../../i18n";
 import { api } from "../../api/client";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import logoUrl from "@/assets/kiwano-logo.svg";
-import { iconForEndpoint } from "@/components/icons/infer";
+import { ProviderMark } from "@/components/icons/ProviderMark";
 import { agentMeta } from "../../lib/agents";
 import { fmtMoney, fmtTokens } from "../../lib/format";
 import { SEGMENT_ICON } from "./agents";
@@ -337,11 +337,7 @@ export function RouteGraph({
                 >
                   {index + 1}
                 </span>
-                {iconForEndpoint(p.endpoint) ? (
-                  <ProviderLogo icon={iconForEndpoint(p.endpoint)} name={p.name} size={16} />
-                ) : (
-                  <ProviderLogo char={p.logo_char} color={p.logo_color} name={p.name} size={16} />
-                )}
+                <ProviderMark provider={p} size={16} />
                 <span className={`min-w-0 flex-1 truncate text-[11.5px] ${refused ? "text-mut" : ""}`}>
                   {p.name}
                 </span>

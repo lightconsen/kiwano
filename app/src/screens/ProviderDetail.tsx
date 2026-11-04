@@ -16,8 +16,7 @@ import { ChevronRight, Gauge, KeyRound, Pencil } from "lucide-react";
 
 import { api } from "../api/client";
 import { LoadFailed, errText } from "../components/LoadFailed";
-import { ProviderLogo } from "@/components/icons/ProviderLogo";
-import { iconForEndpoint } from "@/components/icons/infer";
+import { ProviderMark } from "@/components/icons/ProviderMark";
 import { Dot } from "../components/bits";
 import { agentMeta } from "../lib/agents";
 import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
@@ -150,7 +149,6 @@ export default function ProviderDetail({
     );
   }
 
-  const brand = iconForEndpoint(provider.endpoint);
   const u = provider.usage;
   const inOut = u ? u.input_tokens + u.output_tokens : 0;
   const cacheDenom = u ? u.input_tokens + u.cache_read_tokens + u.cache_creation_tokens : 0;
@@ -177,11 +175,7 @@ export default function ProviderDetail({
       {/* Who it is. */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
-          {brand ? (
-            <ProviderLogo icon={brand} name={provider.name} size={40} />
-          ) : (
-            <ProviderLogo char={provider.logo_char} color={provider.logo_color} name={provider.name} size={40} />
-          )}
+          <ProviderMark provider={provider} size={40} />
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-[15px] font-semibold">
               {provider.name}

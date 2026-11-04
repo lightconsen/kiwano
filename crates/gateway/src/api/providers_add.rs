@@ -30,8 +30,8 @@ use kiwano_api::providers::{
 use super::catalog::{catalog_id_for, catalog_snapshot};
 use super::limits::{known_limit_currencies, normalize_declared_prices, normalize_limit_unit};
 use super::views::{
-    advanced_vm, billing_to_db, billing_to_ui, display_endpoint, endpoint_note, provider_currency,
-    vm_endpoints,
+    advanced_vm, billing_to_db, billing_to_ui, catalog_logo, display_endpoint, endpoint_note,
+    provider_currency, vm_endpoints,
 };
 
 /// Serialize the percent limits into the `providers.plan_limits` JSON shape.
@@ -172,6 +172,7 @@ pub fn endpoints_from(input: &[NewEndpointInput]) -> Vec<crate::store::ProviderE
 fn provider_vm(
     provider: &Provider,
     catalog_entries: &[super::catalog::CatalogEntryVm],
+    hub_url: &str,
     input: &NewProviderInput,
 ) -> ProviderVm {
     let vm_health = HealthVm {
@@ -188,6 +189,7 @@ fn provider_vm(
         logo_char: logo_char(&provider.name),
         logo_color: palette_color(&provider.name).to_string(),
         logo_border: false,
+        catalog_logo: catalog_logo(provider, catalog_entries, hub_url),
         catalog_id: provider.catalog_id.clone(),
         currency: provider_currency(provider, catalog_entries),
         endpoint: display_endpoint(provider),
@@ -468,6 +470,15 @@ pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<
     Ok(())
 }
 
+/// The Hub's base URL, or the public default when the user has not set one —
+/// the same fallback the sync uses, so a logo and a catalog download resolve
+/// against one address.
+fn hub_url(store: &Store) -> String {
+    store
+        .ui_hub_url()
+        .unwrap_or_else(|| crate::api::sync::DEFAULT_HUB_URL.to_string())
+}
+
 pub fn add_provider(
     store: &Store,
     id: &str,
@@ -481,6 +492,7 @@ pub fn add_provider(
         return Ok(provider_vm(
             &existing,
             &catalog_snapshot(store).entries,
+            &hub_url(store),
             input,
         ));
     }
@@ -586,6 +598,7 @@ pub fn add_provider(
     // The logo is derived from the stored name too — see where it is used.
     let vm_logo_char = logo_char(&vm_name);
     let vm_logo_color = palette_color(&vm_name).to_string();
+    let vm_catalog_logo = catalog_logo(&provider, &catalog_entries, &hub_url(store));
     let vm_catalog_id = provider.catalog_id.clone();
     let vm_model_default = provider.model_default.clone();
     let vm_endpoint = display_endpoint(&provider);
@@ -623,6 +636,7 @@ pub fn add_provider(
         logo_char: vm_logo_char,
         logo_color: vm_logo_color,
         logo_border: false,
+        catalog_logo: vm_catalog_logo,
         catalog_id: vm_catalog_id,
         currency: vm_currency,
         endpoint: vm_endpoint,

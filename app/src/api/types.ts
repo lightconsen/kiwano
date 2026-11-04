@@ -369,6 +369,11 @@ export interface Provider {
   logo_char: string;
   logo_color: string;
   logo_border?: boolean;
+  /** The brand mark the Hub publishes for this provider's catalog entry, as an
+      absolute URL. Absent when the provider matches no entry (a self-hosted
+      relay) or the entry carries no logo — the row then infers a mark from the
+      endpoint and falls back to the letter avatar. */
+  catalog_logo?: string | null;
   endpoint: string;
   protocol: Protocol;
   /** The catalog entry this provider was added from, when it came from the

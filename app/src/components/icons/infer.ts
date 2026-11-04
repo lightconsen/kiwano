@@ -1,9 +1,11 @@
 // Infer a provider's brand icon from its endpoint URL.
-// The Apps list stores only logo_char/logo_color (letter avatars); instead of
-// persisting an icon per row, the brand mark is derived at render time from
-// the endpoint host — the same signal the import flow has. Returns a key from
-// the registry in ./index, or null when nothing matches (caller keeps the
-// letter-avatar fallback).
+//
+// This is the **fallback**, not the first answer: a provider linked to a
+// catalog entry is drawn with the logo the Hub publishes for it
+// (`ProviderVm.catalog_logo`, see `ProviderMark`). What this covers is a
+// provider no entry names — a self-hosted relay, a vendor added by hand, a
+// local server. Returns a key from the registry in ./index, or null when
+// nothing matches (caller keeps the letter-avatar fallback).
 import { hasIcon } from "./index";
 
 /** host-substring → registry key; first match wins (specific rules first) */
@@ -45,6 +47,10 @@ const RULES: [string, string][] = [
   ["googleapis", "google"],
   ["gemini", "gemini"],
   ["aistudio", "google"],
+  // Command Code serves its provider API from its own site's subdomain. The
+  // catalog publishes its logo, so this only fires for a hand-typed provider
+  // the Hub never matched — which is exactly the case the fallback is for.
+  ["commandcode", "commandcode"],
   ["grok", "grok"],
   ["x.ai", "xai"],
   ["anthropic", "anthropic"],

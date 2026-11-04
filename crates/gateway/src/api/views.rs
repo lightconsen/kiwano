@@ -66,6 +66,30 @@ pub fn provider_currency(p: &Provider, entries: &[CatalogEntryVm]) -> String {
         .unwrap_or_else(|| "USD".to_string())
 }
 
+/// The Hub-hosted brand mark of the catalog entry this provider belongs to, as
+/// an absolute URL — or `None` when it belongs to none, or when the entry
+/// carries no logo.
+///
+/// The entry is the one the provider is **linked** to (`catalog_id`), so the
+/// picture and the price agree about which entry this row is: a provider whose
+/// endpoint happens to look like a vendor's is not dressed as that vendor
+/// unless the link says so. A row added before the catalog was ever synced has
+/// no link yet, and then the endpoint is asked the same unambiguous question
+/// the add path asks — a hand-typed provider is matched to its entry by URL.
+///
+/// The path is resolved against `hub_url` here rather than in the webview: the
+/// catalog publishes it relative to the Hub, and both sides resolve it with
+/// [`super::sync::hub_asset_url`] — the same rule, so the app and the shelf
+/// cannot disagree about where a logo lives.
+pub fn catalog_logo(p: &Provider, entries: &[CatalogEntryVm], hub_url: &str) -> Option<String> {
+    let id = match p.catalog_id.as_deref() {
+        Some(id) => id.to_string(),
+        None => super::catalog::catalog_id_for(entries, p)?,
+    };
+    let path = entries.iter().find(|e| e.id == id)?.logo.as_deref()?;
+    super::sync::hub_asset_url(hub_url, path).ok()
+}
+
 pub fn advanced_vm(p: &Provider) -> Option<ProviderAdvancedVm> {
     if p.timeout_secs.is_none() && p.retries.is_none() && p.headers.is_none() && p.proxy.is_none() {
         return None;
@@ -175,5 +199,91 @@ pub fn fmt_tokens(v: i64) -> String {
         format!("{}k", (v as f64 / 1_000.0).round() as i64)
     } else {
         v.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, endpoint: &str, logo: Option<&str>) -> CatalogEntryVm {
+        let logo = logo
+            .map(|l| format!(r#""logo":"{l}","#))
+            .unwrap_or_default();
+        serde_json::from_str(&format!(
+            r#"{{"id":"{id}","name":"{id}","tag":"aggregate","rating":4,
+                {logo}
+                "billing":"payg","currency":"USD",
+                "endpoints":[{{"protocol":"openai","endpoint":"{endpoint}"}}]}}"#
+        ))
+        .expect("catalog entry fixture")
+    }
+
+    fn provider(catalog_id: Option<&str>, endpoint: &str) -> Provider {
+        use crate::store::Protocol;
+        let mut p = crate::store::test_support::sample_provider("p", Protocol::OpenAI);
+        p.catalog_id = catalog_id.map(str::to_string);
+        p.base_url = endpoint.to_string();
+        p
+    }
+
+    const HUB: &str = "https://hub.example/catalog.json";
+
+    /// The mark comes from the entry the row is linked to, resolved against the
+    /// Hub base — the same resolver `manifest.json` uses.
+    #[test]
+    fn a_linked_entry_lends_its_logo_as_an_absolute_url() {
+        let entries = vec![entry(
+            "commandcode",
+            "https://api.commandcode.ai/provider/v1",
+            Some("logos/commandcode.png"),
+        )];
+        let p = provider(
+            Some("commandcode"),
+            "https://api.commandcode.ai/provider/v1",
+        );
+        assert_eq!(
+            catalog_logo(&p, &entries, HUB).as_deref(),
+            Some("https://hub.example/logos/commandcode.png")
+        );
+    }
+
+    /// A row added before the catalog was synced has no link yet; the endpoint
+    /// answers the same unambiguous question the add path asks it.
+    #[test]
+    fn an_unlinked_row_is_matched_by_its_endpoint() {
+        let entries = vec![entry(
+            "deepseek",
+            "https://api.deepseek.com",
+            Some("logos/deepseek.svg"),
+        )];
+        let p = provider(None, "https://api.deepseek.com");
+        assert_eq!(
+            catalog_logo(&p, &entries, HUB).as_deref(),
+            Some("https://hub.example/logos/deepseek.svg")
+        );
+    }
+
+    /// The link wins over the URL: a row the user linked to one entry is not
+    /// dressed as whichever entry its endpoint happens to resemble. And an
+    /// entry with no published logo lends nothing, rather than a guess.
+    #[test]
+    fn the_link_decides_and_an_entry_without_a_logo_lends_nothing() {
+        let entries = vec![
+            entry(
+                "one",
+                "https://api.shared.example/v1",
+                Some("logos/one.svg"),
+            ),
+            entry("two", "https://api.other.example/v1", None),
+        ];
+        // Linked to `two` — which publishes no logo — even though the endpoint
+        // also matches `one`. The link is the answer, so there is no mark.
+        let p = provider(Some("two"), "https://api.shared.example/v1");
+        assert_eq!(catalog_logo(&p, &entries, HUB), None);
+
+        // Nothing matches and nothing is linked: the letter avatar is next.
+        let p = provider(None, "https://relay.internal");
+        assert_eq!(catalog_logo(&p, &entries, HUB), None);
     }
 }

@@ -302,6 +302,11 @@ export interface ModelPrice {
       two write windows differently. Absent means this row's cache-write rate
       covers both. */
   cache_creation_1h?: string;
+  /** The model's context window, in tokens, as the vendor states it — the
+      denominator behind "how full was this prompt". Absent for the vendors that
+      publish none (a bit under a sixth of the table), which reads as "no window
+      published", never as zero. Not a rate: nothing bills from it. */
+  context?: number;
   /** ISO code the figures are denominated in (the provider's own currency) */
   currency: string;
   off_peak?: {

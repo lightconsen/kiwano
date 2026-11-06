@@ -723,6 +723,7 @@ mod tests {
             cache_read: "0".into(),
             cache_creation: "0".into(),
             cache_creation_1h: None,
+            context: None,
             currency: "USD".into(),
         }
     }

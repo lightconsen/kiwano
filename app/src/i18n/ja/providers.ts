@@ -102,6 +102,10 @@ export const providers = {
   detailPlanUsage: "プラン使用量",
   detailResets: "リセット {time}",
   detailRecent: "最近のリクエスト",
+  detailRecentAll: "もっと見る",
+  detailRecentAllTitle: "このプロバイダーを通ったすべてのリクエストを Dashboard で表示",
+  detailContextTitle: "このモデルが公表する {window} トークンのうち {prompt}",
+  detailContextNoWindow: "Hub はこのモデルのコンテキストウィンドウを公表していないため、割合は出せません",
   openDetailTitle: "ダブルクリックで詳細ページを開く",
   openDetail: "詳細を開く",
 

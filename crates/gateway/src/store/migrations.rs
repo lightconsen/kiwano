@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 38;
+pub const SCHEMA_VERSION: i32 = 39;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -996,6 +996,21 @@ const MIGRATION_V38: &str = r#"
 ALTER TABLE request_logs ADD COLUMN turns INTEGER;
 "#;
 
+/// v39: how much context a model's window holds, on the Hub price mirror.
+///
+/// The Hub publishes `context` — the vendor's own figure for the whole input
+/// side, in tokens — and it is the denominator behind "how full is this
+/// conversation": a 72k prompt is comfortable in a 1M window and nearly full in
+/// an 80k one. The mirror kept the prices and dropped the figure, so nothing in
+/// the app could answer that question.
+///
+/// NULL is a row whose vendor states no window (about a sixth of the published
+/// table), and that is not zero: a reader shows the absence rather than a
+/// percentage against a guessed denominator.
+const MIGRATION_V39: &str = r#"
+ALTER TABLE model_pricing ADD COLUMN context INTEGER;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1169,6 +1184,9 @@ impl Store {
         }
         if version < 38 {
             conn.execute_batch(MIGRATION_V38)?;
+        }
+        if version < 39 {
+            conn.execute_batch(MIGRATION_V39)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -1560,8 +1578,9 @@ mod tests {
             // `model_pricing` on the same rule: v36 is the first migration past
             // this stamp to alter it, and an ALTER on a table that is not there
             // fails the open. The shape is the one v9 created and v13 widened —
-            // `tiers` in, `cache_creation_1h` out, since adding that is what v36
-            // is for and a column cannot be added twice.
+            // `tiers` in, and out everything the alters above this stamp add
+            // (`cache_creation_1h` from v36, `context` from v39), since adding
+            // one here would be the column's second add and fail the ladder.
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS model_pricing (
                      provider_id     TEXT NOT NULL DEFAULT '',

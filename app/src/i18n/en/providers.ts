@@ -128,6 +128,12 @@ export const providers = {
   detailPlanUsage: "Plan usage",
   detailResets: "resets {time}",
   detailRecent: "Recent requests",
+  /** Right of the Recent requests heading: the whole of this provider's traffic,
+      on the Dashboard, filtered to it. */
+  detailRecentAll: "More",
+  detailRecentAllTitle: "Every request through this provider, on the Dashboard",
+  detailContextTitle: "{prompt} of {window} tokens — the window this model publishes",
+  detailContextNoWindow: "The Hub publishes no context window for this model, so there is nothing to rate",
   openDetailTitle: "Double-click for this provider's page",
   openDetail: "Open details",
 

@@ -150,6 +150,17 @@ pub struct ModelPriceEntry {
     /// `cache_creation`'s tokens, never a fifth bucket.
     #[serde(default)]
     pub cache_creation_1h: Option<String>,
+    /// The model's context window: the vendor's own figure for the whole input
+    /// side, in tokens (migration v39 put it in the mirror).
+    ///
+    /// The document calls it `context`, and a bit under a sixth of the published
+    /// table leaves it out — so `None` is "the vendor states no window", never
+    /// zero. Nothing here reads it: it is not a price and no arithmetic depends
+    /// on it. It is the denominator a reader holds a request's prompt against,
+    /// and a missing window means that reading is unavailable rather than that
+    /// the prompt fit.
+    #[serde(default)]
+    pub context: Option<u64>,
     pub currency: String,
     /// The discounted rates in force outside `peak_hours`. The row's own rates
     /// above are the **peak** ones — they apply inside the windows.
@@ -284,6 +295,10 @@ impl DeclaredPrices {
                 cache_read: m.cache_read.clone(),
                 cache_creation: m.cache_creation.clone(),
                 cache_creation_1h: m.cache_creation_1h.clone(),
+                // The form collects rates, not capability facts — and the window
+                // is the Hub's statement about the model, not the user's about
+                // the vendor.
+                context: None,
                 currency: self.currency.clone(),
                 // Bands and time-of-day tiers are the Hub's vocabulary, not
                 // something the form collects: a declared row is flat.

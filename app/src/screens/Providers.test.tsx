@@ -53,6 +53,7 @@ const { apiMock } = vi.hoisted(() => ({
     setProviderEnabled: vi.fn(),
     listRequestLogs: vi.fn(),
     listApiKeys: vi.fn(),
+    listModelPrices: vi.fn(),
     getRequestLog: vi.fn(),
   },
 }));
@@ -175,6 +176,10 @@ beforeEach(() => {
     currencies: ["CNY", "USD"],
     exchange_rates: {},
   });
+  // The page reads the price mirror for one column — each model's published
+  // window. Empty is what a fresh install answers, and the tests that care
+  // override it.
+  apiMock.listModelPrices.mockResolvedValue([]);
 });
 
 describe("an agent tab", () => {
@@ -434,6 +439,134 @@ describe("a provider's own page", () => {
     );
 
     expect(await screen.findByText(en.providers.detailGone)).toBeInTheDocument();
+  });
+
+  it("reads each recent request's prompt against the window its model publishes", async () => {
+    // The two shapes the column has to tell apart: a row whose model publishes a
+    // window gets a percentage, and one whose model publishes none gets the
+    // prompt's own size — never a percentage against a guessed denominator.
+    apiMock.listProviders.mockResolvedValue([deepseek({ catalog_id: "deepseek" })]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.listApiKeys.mockResolvedValue([]);
+    apiMock.listModelPrices.mockResolvedValue([
+      {
+        provider_id: "deepseek",
+        model_id: "deepseek-chat",
+        display_name: "DeepSeek Chat",
+        input: "2",
+        output: "8",
+        cache_read: "0.2",
+        cache_creation: "0",
+        context: 64_000,
+        currency: "USD",
+      },
+    ]);
+    const log = (id: number, over: Record<string, unknown>) => ({
+      id,
+      ts: "2026-11-06T10:00:00Z",
+      method: "POST",
+      path: "/v1/messages",
+      query: null,
+      agent: "claude-code-reviewer",
+      attribution: "key",
+      provider_id: "deepseek",
+      model: "deepseek-chat",
+      status_code: 200,
+      error_kind: null,
+      error_message: null,
+      session_id: null,
+      is_streaming: true,
+      input_tokens: 0,
+      output_tokens: 100,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      reasoning_tokens: 0,
+      usage_missing: false,
+      latency_ms: 900,
+      first_token_ms: null,
+      request_headers: null,
+      response_headers: null,
+      request_size: 0,
+      response_size: 0,
+      truncated: false,
+      request_notes: null,
+      ...over,
+    });
+    apiMock.listRequestLogs.mockResolvedValue({
+      rows: [
+        // A fresh-only input with a big cache read: the prompt is the sum, and
+        // 48k of 64k is three quarters of the window.
+        log(1, { input_tokens: 800, cache_read_tokens: 47_200 }),
+        // A model the mirror does not price: the prompt still shows, in
+        // brackets rather than as a percentage.
+        log(2, { model: "unpriced-model", input_tokens: 12_000 }),
+      ],
+      total: 2,
+    });
+    render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} openProviderId="deepseek" />,
+    );
+
+    expect(await screen.findByText("75%")).toBeInTheDocument();
+    expect(screen.getByText("[12k]")).toBeInTheDocument();
+    // The long agent id is one cut line, with the whole value recoverable.
+    // Two rows share the id, so both cells are the same claim.
+    const agents = screen.getAllByTitle("claude-code-reviewer");
+    expect(agents).toHaveLength(2);
+    expect(agents[0].className).toContain("truncate");
+  });
+
+  it("sends More to the Dashboard, filtered to this provider", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.listApiKeys.mockResolvedValue([]);
+    apiMock.listRequestLogs.mockResolvedValue({
+      rows: [
+        {
+          id: 7,
+          ts: "2026-11-06T10:00:00Z",
+          method: "POST",
+          path: "/v1/messages",
+          query: null,
+          agent: "claude",
+          attribution: "key",
+          provider_id: "deepseek",
+          model: "deepseek-chat",
+          status_code: 200,
+          error_kind: null,
+          error_message: null,
+          session_id: null,
+          is_streaming: false,
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_tokens: 0,
+          cache_creation_tokens: 0,
+          reasoning_tokens: 0,
+          usage_missing: false,
+          latency_ms: 100,
+          first_token_ms: null,
+          request_headers: null,
+          response_headers: null,
+          request_size: 0,
+          response_size: 0,
+          truncated: false,
+          request_notes: null,
+        },
+      ],
+      total: 40,
+    });
+    const user = userEvent.setup();
+    window.location.hash = "";
+    render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={codexInstalled} openProviderId="deepseek" />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: en.providers.detailRecentAll }));
+    // A hash the router knows how to read: the Dashboard's provider filter
+    // arrives already set, so "all of them" is the same rows, scoped.
+    expect(window.location.hash).toBe(`#dashboard/provider/${encodeURIComponent("deepseek")}`);
   });
 });
 

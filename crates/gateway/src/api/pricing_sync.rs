@@ -155,22 +155,24 @@ pub fn seed_model_pricing(store: &Store) -> Result<SeededReport, String> {
                 .execute(
                     "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
                                                 cache_read, cache_creation, cache_creation_1h,
-                                                currency, source, tiers)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                                                context, currency, source, tiers)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                      ON CONFLICT(provider_id, model_id) DO UPDATE SET
                         display_name = ?3, input = ?4, output = ?5,
                         cache_read = ?6, cache_creation = ?7, cache_creation_1h = ?8,
-                        currency = ?9, source = ?10, tiers = ?11
+                        context = ?9, currency = ?10, source = ?11, tiers = ?12
                      -- COALESCE on the nullable columns: a row may carry NULL in
-                     -- `source` (legacy), `tiers` (a model with no schedule) or
-                     -- `cache_creation_1h` (one write rate for both TTLs), and
+                     -- `source` (legacy), `tiers` (a model with no schedule),
+                     -- `cache_creation_1h` (one write rate for both TTLs) or
+                     -- `context` (a vendor that states no window), and
                      -- `NULL <> ?` is NULL (falsy) — which would silently skip the
                      -- very update that adds one.
                      WHERE display_name <> ?3 OR input <> ?4 OR output <> ?5
-                        OR cache_read <> ?6 OR cache_creation <> ?7 OR currency <> ?9
-                        OR COALESCE(source, '') <> ?10
-                        OR COALESCE(tiers, '') <> COALESCE(?11, '')
-                        OR COALESCE(cache_creation_1h, '') <> COALESCE(?8, '')",
+                        OR cache_read <> ?6 OR cache_creation <> ?7 OR currency <> ?10
+                        OR COALESCE(source, '') <> ?11
+                        OR COALESCE(tiers, '') <> COALESCE(?12, '')
+                        OR COALESCE(cache_creation_1h, '') <> COALESCE(?8, '')
+                        OR COALESCE(context, 0) <> COALESCE(?9, 0)",
                     rusqlite::params![
                         provider_id,
                         model_id,
@@ -180,6 +182,10 @@ pub fn seed_model_pricing(store: &Store) -> Result<SeededReport, String> {
                         m.cache_read,
                         m.cache_creation,
                         m.cache_creation_1h,
+                        // `u64` is the field's type and `i64` is SQLite's
+                        // integer; a context window is far inside the range, so
+                        // the cast is a restatement rather than a narrowing.
+                        m.context.map(|c| c as i64),
                         m.currency,
                         source,
                         m.tiers_json(),
@@ -569,6 +575,55 @@ mod tests {
         let rows = store.load_model_pricing().unwrap();
         let kimi = rows.iter().find(|r| r.model_id == "kimi-k3").unwrap();
         assert_eq!(kimi.cache_creation_1h.as_deref(), Some("45"));
+    }
+
+    /// A model's context window is a fact about the model, not a rate — but it
+    /// rides the same document, so the seeder has to carry it or the app has no
+    /// denominator to show. NULL for the vendors that state none, and a changed
+    /// window still rewrites the row: the conflict clause watches the column.
+    #[test]
+    fn a_context_window_reaches_the_mirror_and_comes_back() {
+        let (store, dir) = test_env();
+        let doc = r#"{"version":1,"generated_at":"t","exchange_rates":{"USD":1.0},"models":[
+            {"model_id":"m1","display_name":"M1","input":"1","output":"2",
+             "cache_read":"0","cache_creation":"0","context":200000,"currency":"USD"},
+            {"model_id":"m2","display_name":"M2","input":"1","output":"2",
+             "cache_read":"0","cache_creation":"0","currency":"USD"}]}"#;
+        store
+            .save_hub_models_cache(1, doc, &sha_a(), "2026-01-01T00:00:00Z")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&store).unwrap().seeded, 2);
+
+        let store = crate::store::Store::open(dir.path().join("kiwano.db")).unwrap();
+        let rows = store.load_model_pricing().unwrap();
+        let m1 = rows.iter().find(|r| r.model_id == "m1").unwrap();
+        assert_eq!(m1.context, Some(200_000));
+        // A vendor that states no window: NULL, which the page reads as "no
+        // window published" rather than as a window of zero tokens.
+        let m2 = rows.iter().find(|r| r.model_id == "m2").unwrap();
+        assert_eq!(m2.context, None);
+
+        // Only the window moves (the prices are the same bytes), and the row is
+        // still rewritten.
+        let changed = doc.replace(r#""context":200000"#, r#""context":1000000"#);
+        store
+            .save_hub_models_cache(2, &changed, &sha_b(), "2026-01-02T00:00:00Z")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&store).unwrap().seeded, 1);
+        let rows = store.load_model_pricing().unwrap();
+        let m1 = rows.iter().find(|r| r.model_id == "m1").unwrap();
+        assert_eq!(m1.context, Some(1_000_000));
+
+        // …and a window the document drops is written back as NULL, not kept:
+        // a re-seed is the table *being* the document.
+        let dropped = doc.replace(r#","context":200000"#, "");
+        store
+            .save_hub_models_cache(3, &dropped, &"c".repeat(64), "2026-01-03T00:00:00Z")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&store).unwrap().seeded, 1);
+        let rows = store.load_model_pricing().unwrap();
+        let m1 = rows.iter().find(|r| r.model_id == "m1").unwrap();
+        assert_eq!(m1.context, None);
     }
 
     #[test]

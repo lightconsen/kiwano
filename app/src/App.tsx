@@ -56,6 +56,9 @@ function routeFromHash(): {
   agent: AgentRef | null;
   logId: number | null;
   sessionId: string | null;
+  /** `#dashboard/provider/<provider id>` — the Dashboard with its provider
+      filter already set, which is where a provider's page sends "More". */
+  filterProviderId: string | null;
   /** `#providers/one/<provider id>` — one provider's own page. */
   providerId: string | null;
   /** `#providers/one/<id>/log/<log id>` — one of its requests, opened from
@@ -76,6 +79,13 @@ function routeFromHash(): {
       ? Number(extra)
       : null;
   const sessionId = route === "dashboard" && tail === "session" && extra ? extra : null;
+  // The Dashboard, scoped to one provider: a provider's page hands its reader
+  // over to the whole of its traffic rather than growing a second log list.
+  // A seed for the filter, not a separate view — the Dashboard's own window
+  // picker and clearable filters still apply, and a provider with no traffic in
+  // the window falls back to All there rather than showing a dead selection.
+  const filterProviderId =
+    route === "dashboard" && tail === "provider" && extra ? extra : null;
   // One provider's own page, a sibling of the Apps list rather than a panel
   // inside it: the list is the index and the page is the subject, the same
   // division the Dashboard and a session's page already use.
@@ -91,8 +101,8 @@ function routeFromHash(): {
   // arrive as `agent: "session"`, which the Dashboard ignores today and some
   // later screen would not.
   const agent =
-    logId || sessionId || providerId ? null : tail ? tail : null;
-  return { route, agent, logId, sessionId, providerId, providerLogId };
+    logId || sessionId || filterProviderId || providerId ? null : tail ? tail : null;
+  return { route, agent, logId, sessionId, filterProviderId, providerId, providerLogId };
 }
 
 /** `decodeURIComponent` throws on a malformed escape — `#dashboard/session/%E0%A4%A`
@@ -114,6 +124,7 @@ export default function App() {
     agent: AgentRef | null;
     logId: number | null;
     sessionId: string | null;
+    filterProviderId: string | null;
     providerId: string | null;
     providerLogId: number | null;
   }>(routeFromHash);
@@ -407,6 +418,7 @@ export default function App() {
       agent: null,
       logId: null,
       sessionId: null,
+      filterProviderId: null,
       providerId: null,
       providerLogId: null,
     });
@@ -491,6 +503,7 @@ export default function App() {
             openLogId={route.logId ?? undefined}
             openSessionId={route.sessionId ?? undefined}
             managedAgents={managedAgents}
+            filterProviderId={route.filterProviderId ?? undefined}
           />
         )}
         {route.route === "settings" && <Settings />}

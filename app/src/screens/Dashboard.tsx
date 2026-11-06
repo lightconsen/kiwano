@@ -444,6 +444,7 @@ export default function Dashboard({
   openLogId,
   openSessionId,
   managedAgents = [],
+  filterProviderId,
 }: {
   gateway?: GatewayStatus | null;
   /** Deep-linked request-log detail (`#dashboard/log/<id>`), passed through to
@@ -454,6 +455,10 @@ export default function Dashboard({
   openSessionId?: string;
   /** The agents the app manages, for the sessions card — see its own prop. */
   managedAgents?: string[];
+  /** `#dashboard/provider/<id>`: the provider filter starts on this provider.
+   *  A seed rather than a lock — the picker above the panels is what holds the
+   *  filter, and switching it or clearing it is the reader's to do. */
+  filterProviderId?: string;
 } = {}) {
   const t = useT();
   const [win, setWin] = useState<DashboardWindow>("7d");
@@ -464,8 +469,15 @@ export default function Dashboard({
     [gateway],
   );
   // "all" = no filter; otherwise the provider id / agent id
-  const [providerFilter, setProviderFilter] = useState("all");
+  const [providerFilter, setProviderFilter] = useState(filterProviderId ?? "all");
   const [agentFilter, setAgentFilter] = useState("all");
+  // A deep link is a *request*, not a default: arriving at `#dashboard/provider/x`
+  // once seeds the filter, and the usual way in (`#dashboard`) does not. Keyed
+  // on the id so a second link to a different provider, without the screen
+  // unmounting, still lands on it.
+  useEffect(() => {
+    if (filterProviderId) setProviderFilter(filterProviderId);
+  }, [filterProviderId]);
   // The request card's two view-state values, owned here rather than by the card
   // because this screen outlives a trip into a session's page: coming back has to
   // land on the tab the reader left, and the session page is what sets the

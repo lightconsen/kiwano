@@ -19,6 +19,7 @@ import { LoadFailed, errText } from "../components/LoadFailed";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import { Dot } from "../components/bits";
 import { agentMeta } from "../lib/agents";
+import { contextUsage } from "../lib/contextWindow";
 import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
 import { tierLabel } from "./Providers/usage";
 import { useT } from "../i18n";
@@ -27,6 +28,7 @@ import type {
   AgentRoute,
   AgentRef,
   ApiKeyEntry,
+  ModelPrice,
   PlanQuotaReport,
   Provider,
   RequestLogEntry,
@@ -76,6 +78,9 @@ export default function ProviderDetail({
   const [logs, setLogs] = useState<RequestLogEntry[] | null>(null);
   const [logErr, setLogErr] = useState<string | null>(null);
   const [keys, setKeys] = useState<ApiKeyEntry[] | null>(null);
+  // The price mirror, for the windows the models publish. Best-effort like the
+  // key pool: a failed read costs the context percentage, not the page.
+  const [prices, setPrices] = useState<ModelPrice[] | null>(null);
 
   const provider = providers?.find((p) => p.id === providerId) ?? null;
 
@@ -108,6 +113,20 @@ export default function ProviderDetail({
       alive = false;
     };
   }, [providerId]);
+
+  // The Hub's price mirror, for one column: each model's published context
+  // window. Read once for the page rather than per row — it is one local table,
+  // and the alternative is a read per listed request.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listModelPrices()
+      .then((p) => alive && setPrices(p))
+      .catch(() => alive && setPrices(null));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   /** Where this provider sits in each agent that bound it. */
   const places = useMemo(() => {
@@ -401,7 +420,22 @@ export default function ProviderDetail({
 
       {/* What it carried, newest first. */}
       <section className="mt-4">
-        <h3 className="mb-1.5 text-[12.5px] font-semibold">{t("providers.detailRecent")}</h3>
+        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+          <h3 className="text-[12.5px] font-semibold">{t("providers.detailRecent")}</h3>
+          {/* The page lists a dozen; the Dashboard is where all of them live,
+              pre-filtered to this provider — a link into the same rows rather
+              than a second list grown here. */}
+          <button
+            type="button"
+            className="cursor-pointer text-[11px] text-mut hover:text-ink"
+            title={t("providers.detailRecentAllTitle")}
+            onClick={() => {
+              window.location.hash = `#dashboard/provider/${encodeURIComponent(providerId)}`;
+            }}
+          >
+            {t("providers.detailRecentAll")}
+          </button>
+        </div>
         {logErr ? (
           <LoadFailed detail={logErr} onRetry={() => setLogs(null)} />
         ) : !logs ? (
@@ -423,8 +457,21 @@ export default function ProviderDetail({
                 }}
               >
                 <span className="shrink-0 text-mut">{r.ts.slice(11, 19)}</span>
-                <span className="w-[68px] shrink-0 text-mut">{r.agent ?? "—"}</span>
+                {/* An agent id has no upper bound — `claude-code-reviewer` is a
+                    real one — and in a fixed slot it wrapped the row into two
+                    lines. One line, cut, with the whole value in the tooltip. */}
+                <span
+                  className="w-[100px] shrink-0 truncate text-mut"
+                  title={r.agent ?? undefined}
+                >
+                  {r.agent ?? "—"}
+                </span>
                 <span className="min-w-0 flex-1 truncate">{r.model ?? "—"}</span>
+                {/* How full the window was, right-aligned inside the model
+                    column's own space: the number a reader of this list is
+                    actually hunting for — which of these conversations was
+                    close to running out. */}
+                <ContextCell row={r} prices={prices} catalogId={provider.catalog_id} />
                 <span
                   className="w-[38px] shrink-0 text-right"
                   style={{ color: r.status_code >= 400 ? "var(--red)" : undefined }}
@@ -463,6 +510,49 @@ function Stat({
         {value}
       </div>
     </div>
+  );
+}
+
+/** One request's context reading, in the row's trailing space.
+ *
+ *  Two shapes, because there are two honest answers. With a published window it
+ *  is `pct%` — the figure the reader is comparing down the column — and the
+ *  tooltip carries the pair behind it. Without one, the prompt's own size in
+ *  brackets: the fact is still there, and no percentage is invented against a
+ *  denominator nobody published.
+ *
+ *  Empty when the row cannot say either (no usage reported, or no input-side
+ *  tokens), which is a rendering of "nothing known" rather than a zero. */
+function ContextCell({
+  row,
+  prices,
+  catalogId,
+}: {
+  row: RequestLogEntry;
+  prices: ModelPrice[] | null;
+  catalogId?: string | null;
+}) {
+  const t = useT();
+  const reading = contextUsage(row, prices, catalogId);
+  if (!reading) return <span className="w-[62px] shrink-0" aria-hidden="true" />;
+  const { prompt, window, pct } = reading;
+  const tone =
+    pct == null ? undefined : pct >= 90 ? "var(--red)" : pct >= 70 ? "var(--amber)" : undefined;
+  return (
+    <span
+      className="w-[62px] shrink-0 text-right text-mut"
+      style={{ color: tone }}
+      title={
+        window
+          ? t("providers.detailContextTitle", {
+              prompt: prompt.toLocaleString(),
+              window: window.toLocaleString(),
+            })
+          : t("providers.detailContextNoWindow")
+      }
+    >
+      {pct == null ? `[${fmtTokens(prompt)}]` : `${pct}%`}
+    </span>
   );
 }
 

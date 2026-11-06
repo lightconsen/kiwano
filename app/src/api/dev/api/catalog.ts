@@ -83,7 +83,7 @@ export const catalogApi: Pick<
     // one the catalog cannot (it names a single representative model).
     const rows: ModelPrice[] = catalog
       .filter((e) => e.price_ref)
-      .map((e) => ({
+      .map((e, i) => ({
         provider_id: e.id,
         model_id: e.price_ref!.model_id,
         display_name: e.price_ref!.display_name,
@@ -91,11 +91,32 @@ export const catalogApi: Pick<
         output: e.price_ref!.output,
         cache_read: "0.03",
         cache_creation: "0",
+        // Every other model publishes a window — the hub states one for most of
+        // its table — so the mock's rows carry one too; `kimi` (whose rows the
+        // fixture leaves bare) is the "no window published" case the page has to
+        // draw without a percentage.
+        ...(e.id === "kimi" ? {} : { context: i % 2 === 0 ? 200_000 : 1_000_000 }),
         currency: e.price_ref!.currency,
         ...(e.price_ref!.off_peak ? { off_peak: e.price_ref!.off_peak } : {}),
         ...(e.price_ref!.peak_hours ? { peak_hours: e.price_ref!.peak_hours } : {}),
         ...(e.price_ref!.long_context ? { long_context: e.price_ref!.long_context } : {}),
       }));
+    // The model the request-log fixtures carry, priced by an entry this mock's
+    // provider list does not include: the reading on a provider's page resolves
+    // a window the way the gateway prices — this provider's own row first, then
+    // whichever row names the model — so the demo has rows with a percentage,
+    // not only the bracketed prompt the unpriced ones fall back to.
+    rows.push({
+      provider_id: "anthropic",
+      model_id: "claude-sonnet-4-5",
+      display_name: "Claude Sonnet 4.5",
+      input: "3",
+      output: "15",
+      cache_read: "0.3",
+      cache_creation: "3.75",
+      context: 200_000,
+      currency: "USD",
+    });
     rows.push({
       provider_id: "deepseek",
       model_id: "deepseek-reasoner (R1)",

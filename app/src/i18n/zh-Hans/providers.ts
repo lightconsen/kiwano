@@ -100,6 +100,10 @@ export const providers = {
   detailPlanUsage: "套餐用量",
   detailResets: "{time} 重置",
   detailRecent: "最近的请求",
+  detailRecentAll: "更多",
+  detailRecentAllTitle: "在 Dashboard 上查看经过这个供应商的全部请求",
+  detailContextTitle: "占该模型公布的 {window} token 窗口的 {prompt}",
+  detailContextNoWindow: "Hub 没有为这个模型公布上下文窗口，无法计算占比",
   openDetailTitle: "双击进入该供应商的详情页",
   openDetail: "打开详情",
 

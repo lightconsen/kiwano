@@ -113,6 +113,7 @@ pub(crate) mod test_support {
             cache_read: "0.3".into(),
             cache_creation: "3.75".into(),
             cache_creation_1h: None,
+            context: None,
             currency: "USD".into(),
             off_peak: None,
             peak_hours: None,

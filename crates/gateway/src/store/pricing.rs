@@ -23,7 +23,7 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT provider_id, model_id, display_name, input, output,
-                    cache_read, cache_creation, cache_creation_1h, currency, tiers
+                    cache_read, cache_creation, cache_creation_1h, context, currency, tiers
              FROM model_pricing",
         )?;
         let rows = stmt.query_map([], model_price_from_row)?;
@@ -41,7 +41,7 @@ impl Store {
 /// failing the read: `resolve_pricing` answers an error with an empty table,
 /// which would blank every cost.
 fn model_price_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ModelPriceEntry> {
-    let tiers: Option<String> = r.get(9)?;
+    let tiers: Option<String> = r.get(10)?;
     let mut entry = ModelPriceEntry {
         long_context: None,
         provider_id: r.get(0)?,
@@ -54,7 +54,11 @@ fn model_price_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ModelPriceEnt
         // NULL is a row that prices writing once; the cost side reads that as
         // "the five-minute rate covers both windows".
         cache_creation_1h: r.get(7)?,
-        currency: r.get(8)?,
+        // NULL is a model whose vendor states no window, which the page reads as
+        // "unavailable" rather than as a window of zero. The cast is the same
+        // restatement as the seeder's: SQLite's integer, a token count's `u64`.
+        context: r.get::<_, Option<i64>>(8)?.map(|c| c as u64),
+        currency: r.get(9)?,
         off_peak: None,
         peak_hours: None,
     };
@@ -104,12 +108,12 @@ impl Store {
         conn.execute(
             "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
                                         cache_read, cache_creation, cache_creation_1h,
-                                        currency, source, tiers)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'test', ?10)
+                                        context, currency, source, tiers)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'test', ?11)
              ON CONFLICT(provider_id, model_id) DO UPDATE SET
                 display_name = ?3, input = ?4, output = ?5,
                 cache_read = ?6, cache_creation = ?7, cache_creation_1h = ?8,
-                currency = ?9, tiers = ?10",
+                context = ?9, currency = ?10, tiers = ?11",
             params![
                 e.provider_id,
                 e.model_id,
@@ -119,6 +123,7 @@ impl Store {
                 e.cache_read,
                 e.cache_creation,
                 e.cache_creation_1h,
+                e.context.map(|c| c as i64),
                 e.currency,
                 e.tiers_json(),
             ],

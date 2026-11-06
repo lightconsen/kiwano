@@ -146,6 +146,7 @@ mod tests {
                 cache_read: "0.5".into(),
                 cache_creation: "6.25".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "USD".into(),
             })
             .unwrap();
@@ -252,6 +253,7 @@ mod tests {
                 cache_read: "2".into(),
                 cache_creation: "20".into(),
                 cache_creation_1h: Some("40".into()),
+                context: None,
                 currency: "CNY".into(),
             })
             .unwrap();
@@ -353,6 +355,7 @@ mod tests {
                 cache_read: "2".into(),
                 cache_creation: "25".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "CNY".into(),
             })
             .unwrap();
@@ -463,6 +466,7 @@ mod tests {
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "USD".into(),
             };
         store.upsert_model_pricing(&priced("", "1")).unwrap();
@@ -571,6 +575,7 @@ mod tests {
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "USD".into(),
             }
         };
@@ -713,6 +718,7 @@ mod tests {
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "USD".into(),
             })
             .unwrap();
@@ -838,6 +844,7 @@ mod tests {
                 cache_read: "0.30".into(),
                 cache_creation: "0".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "CNY".into(),
                 off_peak: Some(kiwano_adapters::model_pricing::OffPeakRates {
                     input: "4.5".into(),
@@ -960,6 +967,7 @@ mod tests {
                 cache_read: "0.42".into(),
                 cache_creation: "0".into(),
                 cache_creation_1h: None,
+                context: None,
                 currency: "CNY".into(),
                 off_peak: None,
                 peak_hours: None,

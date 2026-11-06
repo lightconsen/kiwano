@@ -306,3 +306,48 @@ describe("the credential banner's click-through", () => {
     expect(window.location.hash).toBe("#dashboard/log/41");
   });
 });
+
+describe("More on a provider's page", () => {
+  it("lands on the Dashboard with its provider filter set", async () => {
+    // What `#dashboard/provider/<id>` means to the router: the Dashboard, with
+    // one filter already chosen. The panel is the Dashboard's own — the request
+    // log card is what says which provider the list below it covers.
+    window.location.hash = "#dashboard/provider/deepseek";
+    apiMock.getDashboard.mockResolvedValue({
+      requests: 0,
+      requests_delta_pct: null,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      reasoning_tokens: 0,
+      latency_ms: 0,
+      latency_delta_pct: null,
+      cost: 0,
+      cost_off_peak: 0,
+      trend: [],
+      by_provider: [],
+      by_agent: [],
+      filter_providers: [{ id: "deepseek", label: "DeepSeek" }],
+      filter_agents: [],
+    });
+
+    render(<App />);
+
+    // The provider filter starts on the provider the hash named — read off the
+    // read itself, since that is where the seeded value has to arrive.
+    await waitFor(() =>
+      expect(apiMock.getDashboard).toHaveBeenCalledWith("7d", "deepseek", undefined),
+    );
+  });
+
+  it("is still unfiltered when the Dashboard is reached the usual way", async () => {
+    window.location.hash = "#dashboard";
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(apiMock.getDashboard).toHaveBeenCalledWith("7d", undefined, undefined),
+    );
+  });
+});

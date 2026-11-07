@@ -17,6 +17,49 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.4.13] - 2026-11-07
+
+**The version where a provider's page says how full the window was.** A
+request list tells you what a request cost; it does not tell you whether the
+conversation behind it was running out of room. "72,000 tokens" is comfortable
+in a 1M window and nearly full in an 80k one, and the figure that makes the
+difference — the model's context window — was published by the Hub and dropped
+on the way in. Each row now reads `35%` against the window its model states, in
+amber past 70% and red past 90%, with the pair behind it in the tooltip.
+
+The percentage is the only part that needs care, and it is the part taken
+straight from the data. A folded input (an OpenAI-shaped upstream, where the
+prompt already contains the cached part) can never be smaller than a bucket
+inside it; a fresh-only one routinely is — 70k cached against 800 new tokens.
+So the reading is the numbers' own: a count at least as large as its cache
+buckets is the whole prompt, anything less is the fresh part plus the buckets.
+A vendor that publishes no window gets no denominator: the row shows the
+prompt's own size in brackets instead of a percentage against a guess.
+
+**And a link out of it.** "More" beside **Recent requests** opens the Dashboard
+already filtered to that provider, so "all of them" is the same rows at full
+length rather than a second log list grown on the provider's page. The filter
+arrives as a seed — the picker can change it, and a provider with no traffic in
+the window falls back to All instead of leaving a dead selection.
+
+### Added
+
+- **Context-window usage on a provider's page.** The Hub's `models.json` has
+  always stated a `context` window per model; the price mirror kept the rates
+  and dropped it. The mirror carries it now (schema v39, a nullable column), the
+  seeder writes it and re-writes the row when only the window changes, and
+  `ModelPrice` exposes it to the app. A model whose vendor states no window
+  (a bit under a sixth of the published table) is `None`, which reads as "not
+  published" and never as zero.
+- **"More" on a provider's page**, navigating to `#dashboard/provider/<id>` —
+  the Dashboard with its provider filter already set.
+
+### Changed
+
+- The **agent column** in a provider's recent requests no longer wraps: an id
+  like `claude-code-reviewer` is one truncated line, with the whole value in the
+  tooltip.
+
 ## [0.4.12] - 2026-11-04
 
 **The version where the gateway stops remembering failures.** The failure

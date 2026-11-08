@@ -52,13 +52,11 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   timed against the document, so one inserted long after load fills frozen at
   its end value and never appears to move.
 
-- **The agent's wire is drawn like the route it feeds.** Agent → Kiwano used
-  to be a plain grey line whatever the route was doing, so a live route read
-  as a grey wire feeding a green one. It now follows the candidates' own rule:
-  kiwi with the faint glow while something on the other side of the gateway is
-  serving this agent, neutral while nothing on it can. Standby legs keep their
-  dimmer grey — they are not carrying traffic — so the contrast still says
-  which candidate is the one in use.
+- **The agent's wire stays dark grey, so the request's light can be seen.** The
+  stretch from the agent to Kiwano is the one every request crosses; drawing it
+  in the same kiwi as a serving leg left a permanent bright line where the
+  travelling light is the thing meant to move. It keeps the neutral line, and
+  the pulse reads against it.
 
 ## [0.4.14] - 2026-11-08
 

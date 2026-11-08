@@ -145,12 +145,12 @@ function cachePct(u: Provider["usage"]): number | null {
   return Math.round((u.cache_read_tokens / denom) * 100);
 }
 
-/** How long a wire stays lit after the provider behind it recorded a request. */
+/** How long the light stays on the canvas after a candidate recorded a request. */
 const FLASH_MS = 900;
 
 /** The pulse's travel time — the request's own path, agent → gateway → provider.
-    A little under [`FLASH_MS`], so the light has arrived at the provider before
-    the wire dims back to its resting glow. */
+    A little under [`FLASH_MS`], so the light is seen to arrive at the provider
+    before it is taken off the canvas. */
 const PULSE_MS = 800;
 
 /** The numbers whose movement means "this provider just carried a request". */
@@ -294,23 +294,12 @@ export function RouteGraph({
             // pulse crosses the agent's wire and the gateway before it reaches
             // the provider, which is what the request itself did.
             const journey = `M ${AGENT_EDGE} ${hubY} L ${HUB_X} ${hubY} C ${HUB_X + 120} ${hubY}, ${PROV_X - 120} ${y}, ${PROV_X} ${y}`;
-            // A wider copy underneath that exists only while a request is
-            // landing: the glow that answers "this one just took traffic". A
-            // second path rather than an SVG filter, because this canvas is
-            // stretched horizontally and a blur would stretch with it.
+            // Whether a request just landed here. The wire itself does not
+            // change: the travelling light below is the whole answer, and a
+            // second highlight under it only doubled the ink.
             const lit = flash.lit.has(p.id);
             return (
               <g key={b.provider_id}>
-                <path
-                  d={path}
-                  fill="none"
-                  stroke={refused ? "transparent" : "var(--kiwi)"}
-                  strokeWidth={lit ? 7 : 5}
-                  strokeLinecap="round"
-                  strokeOpacity={refused ? 0 : lit ? 0.6 : 0}
-                  style={{ transition: `stroke-opacity ${FLASH_MS}ms ease-out` }}
-                  vectorEffect="non-scaling-stroke"
-                />
                 {/* Resting wire, in the same neutral as the trunk: the route is
                     dark grey until a request lights it, and the light is then
                     the only green on the canvas. Serving and standby differ by

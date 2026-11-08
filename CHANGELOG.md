@@ -57,8 +57,9 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   was serving, so the picture carried a permanent bright line and the request's
   pulse had nothing to stand out from. Every wire is now the neutral line; a
   candidate carrying traffic is drawn at full strength and the ones behind it
-  faint, and the only green on the canvas is the light itself — the pulse
-  travelling the route, and the flash where it lands.
+  faint, and the only green on the canvas is the light itself. A request is
+  told by that pulse alone — the extra glow that used to flash on the leg it
+  landed on is gone, because the light arriving already says where it went.
 
 ## [0.4.14] - 2026-11-08
 

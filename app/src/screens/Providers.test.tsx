@@ -659,8 +659,8 @@ describe("the agent tab's two views", () => {
 
     const graph = screen.getByRole("img", { name: graphAria(en.strategy.single, 1) });
     expect(graph.querySelector("svg > path")!.getAttribute("stroke")).toBe("var(--line)");
-    // The candidate's leg is the line under its flash layer.
-    const leg = graph.querySelector("svg > g > path:nth-of-type(2)")!;
+    // The candidate's leg: the only path in its group until a request lands.
+    const leg = graph.querySelector("svg > g > path")!;
     expect(leg.getAttribute("stroke")).toBe("var(--line)");
   });
 
@@ -691,6 +691,9 @@ describe("the agent tab's two views", () => {
     expect(d.startsWith("M 160 ")).toBe(true);
     expect(d).toContain(" L 500 ");
     expect(d).toContain(" 700 ");
+    // And it is the only thing drawn in the brand green: no second highlight
+    // along the leg it landed on.
+    expect(container.querySelectorAll('path[stroke="var(--kiwi)"]')).toHaveLength(1);
   });
 
   it("offers no switch until the agent has a route to draw", async () => {

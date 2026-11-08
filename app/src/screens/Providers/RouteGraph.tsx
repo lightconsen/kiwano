@@ -22,13 +22,14 @@ import { ArrowDown, ArrowUp, Pin } from "lucide-react";
 import { useT, type KeyPath, type Messages } from "../../i18n";
 import { api } from "../../api/client";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
+import { BillTag } from "@/components/bits";
 import logoUrl from "@/assets/kiwano-logo.svg";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import { agentMeta } from "../../lib/agents";
 import { fmtMoney, fmtTokens } from "../../lib/format";
 import { SEGMENT_ICON } from "./agents";
 import { HealthSummary, TestLatencyButton } from "./rows";
-import { planUtilization, ringColor } from "./usage";
+import { planUtilization, providerCurrency, ringColor } from "./usage";
 import type { AgentRef, AgentRoute, PlanQuotaReport, Provider, StrategyKind } from "../../api/types";
 
 // Layout constants, in wire-layer units. 1000 units is the full width, so a
@@ -79,36 +80,59 @@ function badgeFor(route: AgentRoute, binding: AgentRoute["bindings"][number]): s
 
 /** The usage/quota column, in the one line this picture has for it.
  *
- * The ring carries the percentage (the table's own ring, same thresholds), and
- * the text carries what the percentage is *of*: a group of quota, a plan's live
- * tiers, or the window's tokens. `null` text means the provider has nothing to
- * show yet, which is the table's empty cell too. */
+ * The same four facts the table's usage cell carries, minus its second line:
+ * the billing tag (plan / payg / unl), the percentage the ring would draw, what
+ * that percentage is *of* (a group of quota, a plan's live tiers, or the
+ * spend), and the window's request count. Everything is `null`-able: a provider
+ * with nothing recorded yet shows nothing, which is the table's empty cell too.
+ */
 function usageParts(
   p: Provider,
   plan: PlanQuotaReport | undefined,
-): { pct: number | null; text: string | null; color?: string } {
+): {
+  tag: Provider["billing"];
+  pct: number | null;
+  color?: string;
+  /** The quota amount, the live tier percentages, or the spend. */
+  amount: string | null;
+  requests: number | null;
+} {
   const u = p.usage;
+  const requests = u?.requests ?? null;
   if (u?.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
     const amount =
       u.quota.unit === "requests" || u.quota.unit === "wan_tokens"
         ? `${u.quota.used}/${u.quota.limit}`
         : `${fmtMoney(u.quota.used, u.quota.unit)}/${fmtMoney(u.quota.limit, u.quota.unit)}`;
-    return { pct, text: amount, color: ringColor(p.billing, pct) };
+    return { tag: p.billing, pct, amount, requests, color: ringColor(p.billing, pct) };
   }
   if (p.billing === "plan" && p.plan_limits) {
     const pct = planUtilization(p, plan);
-    // The live tiers, when the endpoint answered: "5h 43%". Absent until it
+    // The live tiers, when the endpoint answered: "43%/18%". Absent until it
     // does, and the ring alone is still the right answer then.
-    const text = plan?.success
+    const amount = plan?.success
       ? plan.tiers.map((tier) => `${Math.round(tier.utilization)}%`).join("/")
       : null;
-    return { pct, text, color: pct != null ? ringColor(p.billing, pct) : undefined };
+    return {
+      tag: p.billing,
+      pct,
+      amount,
+      requests,
+      color: pct != null ? ringColor(p.billing, pct) : undefined,
+    };
   }
   if (u) {
-    return { pct: null, text: `${fmtTokens(u.input_tokens + u.output_tokens)} tok` };
+    // No ceiling, so the line says what the window cost — in the provider's own
+    // currency, never converted — or, for a provider nothing prices, the tokens
+    // it carried.
+    const amount =
+      u.cost != null
+        ? fmtMoney(u.cost, u.cost_currency ?? providerCurrency(p) ?? "USD")
+        : `${fmtTokens(u.input_tokens + u.output_tokens)} tok`;
+    return { tag: p.billing, pct: null, amount, requests };
   }
-  return { pct: null, text: null };
+  return { tag: p.billing, pct: null, amount: null, requests };
 }
 
 /** Share of input-side tokens served from cache — `CacheCell`'s arithmetic,
@@ -122,7 +146,12 @@ function cachePct(u: Provider["usage"]): number | null {
 }
 
 /** How long a wire stays lit after the provider behind it recorded a request. */
-const FLASH_MS = 700;
+const FLASH_MS = 900;
+
+/** The pulse's travel time — the request's own path, agent → gateway → provider.
+    A little under [`FLASH_MS`], so the light has arrived at the provider before
+    the wire dims back to its resting glow. */
+const PULSE_MS = 800;
 
 /** The numbers whose movement means "this provider just carried a request". */
 function usageMark(u: Provider["usage"] | undefined): string {
@@ -140,10 +169,17 @@ function usageMark(u: Provider["usage"] | undefined): string {
  * lights the ones that changed — the same idea as the usage cell's tint, at the
  * other end of the wire.
  *
+ * `seq` counts the moves, not the providers: it keys the travelling pulse, so a
+ * request arriving during another's pulse restarts the light at the agent
+ * instead of inheriting the frame the previous one is standing on.
+ *
  * The first read never flashes: those numbers did not move, they arrived.
  */
-function useUsageFlash(marks: Record<string, string>): Set<string> {
-  const [flashing, setFlashing] = useState<Set<string>>(() => new Set());
+function useUsageFlash(marks: Record<string, string>): { lit: Set<string>; seq: number } {
+  const [flash, setFlash] = useState<{ lit: Set<string>; seq: number }>({
+    lit: new Set(),
+    seq: 0,
+  });
   const previous = useRef<Record<string, string> | null>(null);
   const key = JSON.stringify(marks);
   useEffect(() => {
@@ -154,13 +190,13 @@ function useUsageFlash(marks: Record<string, string>): Set<string> {
       (id) => before[id] !== undefined && before[id] !== marks[id],
     );
     if (moved.length === 0) return;
-    setFlashing(new Set(moved));
-    const timer = window.setTimeout(() => setFlashing(new Set()), FLASH_MS);
+    setFlash((f) => ({ lit: new Set(moved), seq: f.seq + 1 }));
+    const timer = window.setTimeout(() => setFlash((f) => ({ ...f, lit: new Set() })), FLASH_MS);
     return () => window.clearTimeout(timer);
     // Re-run on the numbers, not on identity: `marks` is rebuilt every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return flashing;
+  return flash;
 }
 
 export function RouteGraph({
@@ -204,7 +240,7 @@ export function RouteGraph({
     void api.reorderAgentBindings(route.agent, ids).then(onChanged);
   };
 
-  const flashed = useUsageFlash(
+  const flash = useUsageFlash(
     Object.fromEntries(candidates.map(({ b }) => [b.provider_id, usageMark(byId.get(b.provider_id)?.usage)])),
   );
 
@@ -246,12 +282,16 @@ export function RouteGraph({
             const serving = p.serving_agents.includes(agent);
             const refused = blocked[p.id];
             const path = `M ${HUB_X + 22} ${hubY} C ${HUB_X + 120} ${hubY}, ${PROV_X - 120} ${y}, ${PROV_X} ${y}`;
+            // The request's whole way, not just the candidate's leg of it: the
+            // pulse crosses the agent's wire and the gateway before it reaches
+            // the provider, which is what the request itself did.
+            const journey = `M ${AGENT_EDGE} ${hubY} L ${HUB_X} ${hubY} C ${HUB_X + 120} ${hubY}, ${PROV_X - 120} ${y}, ${PROV_X} ${y}`;
             // A wider, faint copy underneath: the glow that says "this is the
             // one carrying traffic", and the thing that brightens for a moment
             // when a request actually lands on it. A second path rather than an
             // SVG filter, because this canvas is stretched horizontally and a
             // blur would stretch with it.
-            const lit = flashed.has(p.id);
+            const lit = flash.lit.has(p.id);
             return (
               <g key={b.provider_id}>
                 <path
@@ -273,6 +313,26 @@ export function RouteGraph({
                   opacity={serving || refused ? 1 : 0.55}
                   vectorEffect="non-scaling-stroke"
                 />
+                {lit && (
+                  // The light travelling the wire. `pathLength` normalises the
+                  // dash to a fraction of any route, so it reads the same whether
+                  // the candidate is the first row or the fourth; `seq` keys it,
+                  // so a second request restarts the travel from the agent.
+                  // The movement itself is the `route-pulse` keyframe in
+                  // index.css — SMIL would show only its frozen end frame.
+                  <path
+                    key={flash.seq}
+                    d={journey}
+                    fill="none"
+                    stroke="var(--kiwi)"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeDasharray="10 90"
+                    pathLength={100}
+                    vectorEffect="non-scaling-stroke"
+                    style={{ animation: `route-pulse ${PULSE_MS}ms linear forwards` }}
+                  />
+                )}
               </g>
             );
           })}
@@ -382,15 +442,34 @@ export function RouteGraph({
                   )}
                 </span>
               </div>
-              {/* The table's other three columns, together on the line under
-                  the name: usage, cache, status. */}
-              <div className="flex items-center gap-1.5 pl-[26px] font-mono text-[10.5px] text-mut">
+              {/* What the table's four columns say, together on the line(s)
+                  under the name: billing, usage, requests, cache, status.
+                  `flex-wrap`, not `truncate`: the column is a fixed share of the
+                  window, and ellipsising the amount — the one figure the line
+                  exists for — would hide it exactly where the window is small.
+                  A wrapped second line still fits inside ROW_H. */}
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0 pl-[26px] font-mono text-[10.5px] text-mut">
                 {usage.pct != null && (
-                  <span style={{ color: usage.color }} title={t("providers.colUsage")}>
+                  <span className="shrink-0" style={{ color: usage.color }} title={t("providers.colUsage")}>
                     {usage.pct}%
                   </span>
                 )}
-                {usage.text && <span className="truncate">{usage.text}</span>}
+                {/* Billing tag and what it is billing, as one unit: a wrap that
+                    put "PAYG" on one line and its amount on the next would read
+                    as two separate facts. */}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <BillTag billing={usage.tag} />
+                  {usage.amount && <span>{usage.amount}</span>}
+                </span>
+                {/* The window's request count: the table shows it only on rows
+                    without a quota, and it is the number a reader checking
+                    "is this provider carrying traffic at all" wants on every
+                    row. */}
+                {usage.requests != null && (
+                  <span className="shrink-0">
+                    {usage.requests.toLocaleString()} {t("providers.unitReq")}
+                  </span>
+                )}
                 <span
                   className="shrink-0"
                   title={
@@ -409,7 +488,10 @@ export function RouteGraph({
                 >
                   {cache == null ? "–" : t("providers.graphCache", { pct: cache })}
                 </span>
-                <span className="flex shrink-0 items-center">
+                {/* `ml-auto` so the verdict sits at the row's right edge — the
+                    status column's own place in the table — whether it fits on
+                    the first line or ends up on the second. */}
+                <span className="ml-auto flex shrink-0 items-center">
                   {refused ? (
                     <span style={{ color: "var(--red)" }}>{t("providers.blocked")}</span>
                   ) : (

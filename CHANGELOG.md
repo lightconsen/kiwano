@@ -34,6 +34,24 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   turning to "Copied" for 1.2 seconds. The line is a `role="status"` region, so
   a screen reader hears it without focus moving.
 
+- **The route graph says what each candidate is costing.** The picture on an
+  agent's tab carried names, ranks and wires but none of the table's numbers;
+  each row now has them on the line under the name — the billing tag
+  (PAYG / Plan / Local), what the period cost or how much of a quota or plan
+  window is used, the window's request count and the cache share. The status
+  verdict keeps the row's right edge. The line wraps rather than truncating:
+  the column is a fixed share of the window, and an ellipsised amount is the
+  one figure that line exists for.
+
+- **A request lights the whole way in the route graph.** When a candidate
+  records traffic, a light now travels agent → Kiwano → provider, the path the
+  request itself took, instead of only the last leg brightening. It starts at
+  the agent's edge and arrives at the provider inside 800 ms, and a second
+  request restarts it from the agent rather than gliding on from where the
+  first one stopped. The movement is a CSS keyframe: an SVG `<animate>` is
+  timed against the document, so one inserted long after load fills frozen at
+  its end value and never appears to move.
+
 ## [0.4.14] - 2026-11-08
 
 **The version where a captured body is stored once instead of once per turn.**

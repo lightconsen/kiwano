@@ -92,6 +92,23 @@ function deepseek(over: Partial<Provider> = {}): Provider {
   };
 }
 
+/** Enough of a usage summary for a usage cell — or the route graph's own line —
+    to draw its numbers. */
+function usage(requests: number): UsageSummary {
+  return {
+    requests,
+    input_tokens: 1000,
+    output_tokens: 100,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    cost: 1,
+    cost_currency: "USD",
+    latency_ms: null,
+    quota: null,
+    spark: null,
+  };
+}
+
 /** codex's stored route with the given candidates, as `getAgentRoutes` answers it.
     `limit` rides the route because that is the fetch the tab already makes — it
     is not part of the strategy, and passes through here untouched. */
@@ -605,6 +622,55 @@ describe("the agent tab's two views", () => {
     // And back — the button now offers the view it is not showing.
     await user.click(screen.getByRole("button", { name: en.providers.viewTable }));
     expect(await screen.findByText(en.providers.colPriority)).toBeInTheDocument();
+  });
+
+  it("carries each candidate's billing, spend and request count into the picture", async () => {
+    // The table's usage column, in one line under the name: a picture that
+    // showed only names and wires left the reader no way to tell what a route
+    // had cost or whether it was moving at all.
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek({ usage: usage(42) })],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    await user.click(await screen.findByRole("button", { name: en.providers.viewGraph }));
+    const graph = screen.getByRole("img", { name: graphAria(en.strategy.single, 1) });
+    expect(within(graph).getByText(en.app.billing.payg)).toBeInTheDocument();
+    // `fmtMoney` trims the trailing zeros, so a bare $1 is what the backend's
+    // own figures print as.
+    expect(within(graph).getByText("$1")).toBeInTheDocument();
+    expect(within(graph).getByText(`42 ${en.providers.unitReq}`)).toBeInTheDocument();
+  });
+
+  it("sends a light from the agent through the gateway to the candidate", async () => {
+    const user = userEvent.setup();
+    apiMock.testProviderLatency.mockResolvedValue(undefined);
+    const { container } = renderCodexTab({
+      providers: [deepseek({ usage: usage(10) })],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await user.click(await screen.findByRole("button", { name: en.providers.viewGraph }));
+    // The pulse is an animated stroke, found by the keyframe it runs.
+    const pulse = () => container.querySelector('path[style*="route-pulse"]');
+    // A data read is not a request: nothing is travelling until one lands.
+    expect(pulse()).toBeNull();
+
+    // The latency test is the trigger because it re-reads everything without
+    // changing which rows are on screen — the same seam the usage cell's tests
+    // use.
+    apiMock.listProviders.mockResolvedValue([deepseek({ usage: usage(11) })]);
+    await user.click(await screen.findByLabelText(en.providers.testLatency));
+
+    await waitFor(() => expect(pulse()).not.toBeNull());
+    // The whole way, as the request walked it: the light starts at the agent's
+    // edge (160), not at the gateway, and ends at the candidate (700).
+    const d = pulse()!.getAttribute("d")!;
+    expect(d.startsWith("M 160 ")).toBe(true);
+    expect(d).toContain(" L 500 ");
+    expect(d).toContain(" 700 ");
   });
 
   it("offers no switch until the agent has a route to draw", async () => {
@@ -2017,20 +2083,6 @@ describe("a built-in agent's own row", () => {
 // request and the screen re-reads, so a re-read is not itself news — this is
 // what says *which* row moved, judged on the numbers rather than on the read.
 describe("a usage cell whose numbers moved", () => {
-  /** Enough of a summary for the cell to draw its numbers. */
-  const usage = (requests: number): UsageSummary => ({
-    requests,
-    input_tokens: 1000,
-    output_tokens: 100,
-    cache_read_tokens: 0,
-    cache_creation_tokens: 0,
-    cost: 1,
-    cost_currency: "USD",
-    latency_ms: null,
-    quota: null,
-    spark: null,
-  });
-
   const cells = (root: HTMLElement) => [...root.querySelectorAll(".usage-cell")];
 
   it("tints the row whose numbers moved, and leaves the rest alone", async () => {

@@ -76,8 +76,10 @@ function usageTitle(t: Translate, p: Provider): string {
 }
 
 /** The provider's own billing currency, when its limit unit names one.
-    Counted units ("requests", "wan_tokens") are not currencies. */
-function providerCurrency(p: Provider): string | undefined {
+    Counted units ("requests", "wan_tokens") are not currencies.
+    Exported for the route graph, whose spend line must name the same currency
+    the table's usage cell does. */
+export function providerCurrency(p: Provider): string | undefined {
   const unit = p.limit_unit;
   return unit && unit.length === 3 ? unit : undefined;
 }

@@ -280,6 +280,26 @@ textarea,
   transition: background 110ms ease-out;
 }
 
+/* The light a request casts as it travels agent → gateway → provider: one lit
+   segment sliding along the whole route (see RouteGraph.tsx).
+
+   A keyframe rather than SMIL, and not for taste: an `<animate begin="0s">` is
+   timed against the document timeline, so one inserted after the page has been
+   open for a while starts already past its interval, fills frozen at its end
+   value, and the light never appears to move. A CSS animation starts when the
+   element mounts, which is exactly when a request arrives.
+
+   The path carries `pathLength="100"`, so the offsets are fractions of every
+   route regardless of how far the candidate row sits from the gateway. */
+@keyframes route-pulse {
+  from {
+    stroke-dashoffset: 110;
+  }
+  to {
+    stroke-dashoffset: 10;
+  }
+}
+
 .chip {
   transition: all 0.15s;
   cursor: pointer;

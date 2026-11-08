@@ -644,11 +644,11 @@ describe("the agent tab's two views", () => {
     expect(within(graph).getByText(`42 ${en.providers.unitReq}`)).toBeInTheDocument();
   });
 
-  it("keeps the agent's wire neutral so the travelling light reads against it", async () => {
-    // The trunk is the one stretch of the route every request crosses. Painting
-    // it kiwi while a candidate serves left a permanent bright line where the
-    // pulse is supposed to be the thing that moves, so it stays dark grey even
-    // though the leg on the other side of the gateway is lit.
+  it("keeps the whole route neutral so the travelling light reads against it", async () => {
+    // Every wire — the agent's trunk and the candidates' legs — is dark grey at
+    // rest, even where a candidate is serving. A route painted in the brand
+    // green is a permanent bright line, and the pulse is meant to be the only
+    // thing that moves; serving and standby are told apart by opacity instead.
     const user = userEvent.setup();
     renderCodexTab({
       providers: [deepseek()], // serving_agents: ["codex"]
@@ -658,8 +658,10 @@ describe("the agent tab's two views", () => {
     await user.click(await screen.findByRole("button", { name: en.providers.viewGraph }));
 
     const graph = screen.getByRole("img", { name: graphAria(en.strategy.single, 1) });
-    const trunk = graph.querySelector("svg > path")!;
-    expect(trunk.getAttribute("stroke")).toBe("var(--line)");
+    expect(graph.querySelector("svg > path")!.getAttribute("stroke")).toBe("var(--line)");
+    // The candidate's leg is the line under its flash layer.
+    const leg = graph.querySelector("svg > g > path:nth-of-type(2)")!;
+    expect(leg.getAttribute("stroke")).toBe("var(--line)");
   });
 
   it("sends a light from the agent through the gateway to the candidate", async () => {

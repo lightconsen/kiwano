@@ -294,11 +294,10 @@ export function RouteGraph({
             // pulse crosses the agent's wire and the gateway before it reaches
             // the provider, which is what the request itself did.
             const journey = `M ${AGENT_EDGE} ${hubY} L ${HUB_X} ${hubY} C ${HUB_X + 120} ${hubY}, ${PROV_X - 120} ${y}, ${PROV_X} ${y}`;
-            // A wider, faint copy underneath: the glow that says "this is the
-            // one carrying traffic", and the thing that brightens for a moment
-            // when a request actually lands on it. A second path rather than an
-            // SVG filter, because this canvas is stretched horizontally and a
-            // blur would stretch with it.
+            // A wider copy underneath that exists only while a request is
+            // landing: the glow that answers "this one just took traffic". A
+            // second path rather than an SVG filter, because this canvas is
+            // stretched horizontally and a blur would stretch with it.
             const lit = flash.lit.has(p.id);
             return (
               <g key={b.provider_id}>
@@ -308,15 +307,20 @@ export function RouteGraph({
                   stroke={refused ? "transparent" : "var(--kiwi)"}
                   strokeWidth={lit ? 7 : 5}
                   strokeLinecap="round"
-                  strokeOpacity={refused ? 0 : lit ? 0.6 : serving ? 0.18 : 0}
+                  strokeOpacity={refused ? 0 : lit ? 0.6 : 0}
                   style={{ transition: `stroke-opacity ${FLASH_MS}ms ease-out` }}
                   vectorEffect="non-scaling-stroke"
                 />
+                {/* Resting wire, in the same neutral as the trunk: the route is
+                    dark grey until a request lights it, and the light is then
+                    the only green on the canvas. Serving and standby differ by
+                    opacity alone — a candidate carrying traffic is drawn at
+                    full strength, the ones behind it faint. */}
                 <path
                   d={path}
                   fill="none"
-                  stroke={refused ? "var(--red)" : serving ? "var(--kiwi)" : "var(--line)"}
-                  strokeWidth={serving ? 2 : 1.5}
+                  stroke={refused ? "var(--red)" : "var(--line)"}
+                  strokeWidth="1.5"
                   strokeDasharray={refused ? "4 3" : undefined}
                   opacity={serving || refused ? 1 : 0.55}
                   vectorEffect="non-scaling-stroke"

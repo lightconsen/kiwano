@@ -52,11 +52,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   timed against the document, so one inserted long after load fills frozen at
   its end value and never appears to move.
 
-- **The agent's wire stays dark grey, so the request's light can be seen.** The
-  stretch from the agent to Kiwano is the one every request crosses; drawing it
-  in the same kiwi as a serving leg left a permanent bright line where the
-  travelling light is the thing meant to move. It keeps the neutral line, and
-  the pulse reads against it.
+- **The route is dark grey at rest, and the request is the light.** Agent →
+  Kiwano and Kiwano → provider used to be drawn in kiwi wherever a candidate
+  was serving, so the picture carried a permanent bright line and the request's
+  pulse had nothing to stand out from. Every wire is now the neutral line; a
+  candidate carrying traffic is drawn at full strength and the ones behind it
+  faint, and the only green on the canvas is the light itself — the pulse
+  travelling the route, and the flash where it lands.
 
 ## [0.4.14] - 2026-11-08
 

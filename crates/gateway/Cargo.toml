@@ -31,6 +31,10 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 sha2 = "0.10"
 thiserror = "2"
+# The captured bodies are stored as content-addressed, zstd-compressed chunks
+# (see `store::bodies`): a long chat session re-sends its whole history on
+# every turn, so the same bytes arrive thousands of times and are stored once.
+zstd = "0.13"
 
 # Windows DACL hardening in src/store/mod.rs (`harden_permissions`) and the
 # named-pipe admin plane in src/server/admin_ipc.rs. Same crate version as

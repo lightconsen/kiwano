@@ -207,6 +207,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/custom-agents/{id}",
             put(update_custom_agent_route).delete(remove_custom_agent_route),
         )
+        .route("/db/stats", get(db_stats_route))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_admin_token,
@@ -464,6 +465,37 @@ async fn shutdown(State(state): State<Arc<GatewayState>>, headers: HeaderMap) ->
     // Returns before the process exits: axum's graceful shutdown stops
     // accepting and then waits for in-flight responses to finish.
     Json(json!({ "ok": true })).into_response()
+}
+
+/// What the store holds, for `kiwano db stats`.
+///
+/// This lives on the daemon rather than in the client because the CLI must not
+/// hold the daemon's database handle — one writer, and the handle is the thing
+/// the rule is about (`crates/cli/tests/one_writer.rs`). The figures are cheap
+/// to collect and the daemon already has the connection open.
+async fn db_stats_route(State(state): State<Arc<GatewayState>>) -> Response {
+    let chunks = state.store.body_chunk_stats();
+    let pages = state.store.page_stats();
+    let pending = state.store.pending_body_backfill();
+    match (chunks, pages, pending) {
+        (Ok((chunk_count, chunk_bytes)), Ok((page_size, page_count, freelist)), Ok(pending)) => {
+            let free_bytes = freelist * page_size;
+            Json(json!({
+                "body_chunks": chunk_count,
+                "body_chunk_bytes": chunk_bytes,
+                "page_size": page_size,
+                "page_count": page_count,
+                "freelist_pages": freelist,
+                "free_bytes": free_bytes,
+                "used_bytes": (page_count - freelist) * page_size,
+                "pending_backfill": pending,
+            }))
+            .into_response()
+        }
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
 }
 
 /// `GET /status` — the liveness/version probe for everyone, the full gateway

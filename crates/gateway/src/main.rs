@@ -229,6 +229,40 @@ async fn main() {
         });
     }
 
+    // Body backfill: rows logged before v40 still hold their bodies as text, and
+    // on an install that has been running a while that is tens of gigabytes.
+    // Converting it inside the migration would block startup, so it runs here, a
+    // batch at a time, while the daemon serves — readers handle both forms.
+    {
+        let store = state.store.clone();
+        tokio::spawn(async move {
+            const BATCH: i64 = 200;
+            let pending = store.pending_body_backfill().unwrap_or(0);
+            if pending == 0 {
+                return;
+            }
+            tracing::info!(rows = pending, "converting stored bodies to chunk layouts");
+            let mut done = 0i64;
+            loop {
+                match store.backfill_body_batch(BATCH) {
+                    // Between batches, so a backfill of a very large log cannot
+                    // hold the write lock for long enough to stall a request.
+                    Ok(0) => break,
+                    Ok(n) => {
+                        done += n as i64;
+                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, converted = done, "body backfill stopped");
+                        return;
+                    }
+                }
+            }
+            tracing::info!(rows = done, "body backfill finished");
+        });
+    }
+
     let data_app = data_plane_router(state.clone());
     let admin_app = admin_plane_router(state.clone());
 

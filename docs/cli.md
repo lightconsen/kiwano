@@ -493,6 +493,30 @@ scripted poll would silently swallow the alert you were waiting for. Pass
 `logs clear` requires `--yes`: the app confirms with a dialog, and a flag is the
 equivalent for a shell with no TTY.
 
+### The database file
+
+```
+kiwano db stats
+kiwano db vacuum [--dry-run]
+```
+
+`db stats` reports the footprint in four parts: what the file takes on disk,
+what is in use, what is free (pages freed by a prune or a clear, kept for
+reuse), and the size of the captured bodies. It goes over the admin plane like
+every other read, because the CLI still never opens the daemon's database, so
+it answers only while the gateway is running.
+
+`db vacuum` rewrites the file to only the pages in use. It needs an exclusive
+lock and therefore **requires the gateway to be stopped** — it checks by asking
+the daemon, and refuses with the command to run rather than attempting the
+rewrite anyway. `--dry-run` says how much it would return without doing it.
+
+The bodies that dominate the file are stored deduplicated: a chat client resends
+its whole conversation on every turn, so each turn is split into chunks and a
+repeated chunk is stored once. A database written before that change converts
+itself in the background on the first run after upgrading; `db stats` reports
+the conversion until it has no rows left to do.
+
 ### Settings, config and catalog
 
 ```
@@ -599,6 +623,7 @@ self-update).
 | Config export / import | `config export\|import` |
 | cc-switch migration | `import cc-switch` |
 | Catalog shelf + Hub sync + currencies | `catalog list\|sync\|currency` |
+| Database footprint and compaction | `db stats`, `db vacuum` |
 | Daemon lifecycle | `gateway start\|stop\|restart` |
 
 Not covered anywhere: the update check, the update download, and the progress

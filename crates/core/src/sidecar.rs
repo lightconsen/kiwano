@@ -28,7 +28,6 @@ use std::time::Duration;
 
 use kiwano_adapters::config::DbPath;
 use kiwanod::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
-use kiwanod::store::Store;
 
 /// The endpoint type itself, so callers in this crate name
 /// `sidecar::AdminEndpoint` and do not need to know the gateway crate's module
@@ -269,19 +268,42 @@ pub fn admin_endpoint_for(db: &Path) -> AdminEndpoint {
 /// install the app is up before the gateway has ever run. Deliberately never
 /// creates the file — an empty database conjured up by a token lookup would
 /// then be migrated by whichever process got there first.
+///
+/// **Read-only, and it has to stay that way.** This used to open through
+/// `Store::open`, which migrates: a client asking its daemon for a token was
+/// therefore also the thing that upgraded the schema. Run from a test with no
+/// `KIWANO_DB_PATH` it resolved the *real* `~/.kiwano/kiwano.db` and rewrote
+/// it — which is how a development build's schema landed on an installed
+/// install's database. A token lookup is a read of two rows; it has no business
+/// changing the file, and a client that opens a newer database must not be the
+/// one to move it forward.
 pub fn admin_token_for(db: &Path) -> Option<String> {
     if !db.is_file() {
         return None;
     }
-    let store = Store::open(db).ok()?;
+    // Opened read-only so the database cannot be created or migrated here even
+    // by accident — the same guarantee the `.is_file()` check above gives, held
+    // by the connection rather than by a second stat.
+    let conn = rusqlite::Connection::open_with_flags(
+        db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .ok()?;
     // **New place first, old place second**: the
     // token is moving from the app's KV to the daemon's, and the two sides are
     // upgraded independently, so a client has to read whichever row its daemon
     // wrote. The fallback is what makes an old daemon still work; it goes when
     // nothing writes the old row any more.
-    store
-        .gateway_setting(ADMIN_TOKEN_KEY)
-        .or_else(|| store.app_setting(ADMIN_TOKEN_KEY))
+    let read = |table: &str| -> Option<String> {
+        conn.query_row(
+            &format!("SELECT value FROM {table} WHERE key = ?1"),
+            rusqlite::params![ADMIN_TOKEN_KEY],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    };
+    read("gateway_settings")
+        .or_else(|| read("app_settings"))
         .filter(|t| !t.trim().is_empty())
 }
 
@@ -824,6 +846,9 @@ pub fn restart(endpoint: &AdminEndpoint) -> std::io::Result<Child> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests open a store: `admin_token_for` must not, which is what
+    // `a_token_lookup_never_migrates_the_database` pins.
+    use kiwanod::store::Store;
     #[cfg(unix)]
     #[cfg(unix)]
     use std::sync::{Arc, Mutex};
@@ -1041,6 +1066,83 @@ mod tests {
             !missing.exists(),
             "a token lookup must not bring a database into being"
         );
+    }
+
+    /// The token is read while the daemon is still running, which means it may
+    /// not be in the main file yet: in WAL mode a committed row lives in `-wal`
+    /// until a checkpoint folds it back. A read-only connection has to see it
+    /// there, or every client would fail to authenticate against a live daemon
+    /// and only work after it stopped.
+    #[test]
+    fn a_token_in_the_write_ahead_log_is_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        // Held open, and never checkpointed: the writer is the daemon here.
+        let store = Store::open(&path).unwrap();
+        store
+            .set_gateway_setting(ADMIN_TOKEN_KEY, "tok-in-wal")
+            .unwrap();
+        assert!(
+            path.with_extension("db-wal").is_file(),
+            "the test needs the row to still be in the log"
+        );
+
+        assert_eq!(admin_token_for(&path), Some("tok-in-wal".to_string()));
+    }
+
+    /// Reading a token must not migrate the database.
+    ///
+    /// This is not hypothetical: `admin_token_for` opened through `Store::open`,
+    /// which migrates, so any test that reached it without `KIWANO_DB_PATH` set
+    /// resolved the *real* `~/.kiwano/kiwano.db` and moved its schema forward.
+    /// A development build's migration landed on an installed install that way.
+    /// The token is a read of two rows; it must leave `user_version` and the
+    /// table set exactly as it found them.
+    #[test]
+    fn a_token_lookup_never_migrates_the_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        // A database of an *older* schema: the settings tables exist, nothing
+        // else does, and the version says a migration is owed.
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE gateway_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO gateway_settings VALUES ('gateway.admin_token', 'tok-old');
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+        let before: Vec<String> = {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .unwrap();
+            let rows = stmt
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            rows
+        };
+
+        assert_eq!(admin_token_for(&path), Some("tok-old".to_string()));
+
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 1, "the lookup migrated the schema");
+        let after: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(after, before, "the lookup created or dropped a table");
     }
 
     /// Nothing is listening on the endpoint, so every admin call has to report

@@ -148,6 +148,29 @@ pub enum Command {
     /// Migrate a configuration from cc-switch
     #[command(subcommand)]
     Import(ImportCmd),
+
+    /// The database file itself: what it holds, and reclaiming its space
+    #[command(subcommand)]
+    Db(DbCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DbCmd {
+    /// What the store holds, and what each part of it costs
+    Stats,
+
+    /// Return deleted space to the disk
+    ///
+    /// SQLite never shrinks a file on its own: a deleted row's pages go on a
+    /// free list and are reused by later writes, so a database that once held
+    /// 25 GB of captured bodies reports 25 GB forever. Compacting rewrites the
+    /// file to only the pages still in use, which needs an exclusive lock — the
+    /// gateway must be stopped first, or this refuses rather than waiting.
+    Vacuum {
+        /// Report how much would be reclaimed, without reclaiming it
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

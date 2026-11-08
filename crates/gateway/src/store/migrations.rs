@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 39;
+pub const SCHEMA_VERSION: i32 = 40;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -1011,6 +1011,41 @@ const MIGRATION_V39: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN context INTEGER;
 "#;
 
+/// v40: captured bodies move to content-addressed chunks.
+///
+/// The bodies table held one full copy of every request and response, and a chat
+/// client resends its whole history on every turn — this install reached 25 GB
+/// of which 99.4% was `request_bodies`. A body now stores a *layout*: the
+/// ordered hashes of the chunks it is made of, with each distinct chunk kept
+/// once (see `store::bodies`). A turn that appends a few kilobytes stores those
+/// few kilobytes.
+///
+/// The two text columns are kept, not dropped. They are what the existing rows
+/// still hold, and what a body written before this version reads from; the
+/// backfill rewrites them into chunks a batch at a time and only then clears
+/// them. Dropping them here would mean either rewriting 25 GB inside the
+/// migration — blocking startup, which is the one thing an upgrade must not do —
+/// or losing every body the install already had.
+///
+/// `request_layout` NULL therefore means "not backfilled yet, read the text
+/// column". Both NULL means the row has no body at all, which is a different
+/// thing and stays distinguishable.
+const MIGRATION_V40: &str = r#"
+CREATE TABLE IF NOT EXISTS request_bodies (
+    log_id        INTEGER PRIMARY KEY REFERENCES request_logs(id) ON DELETE CASCADE,
+    request_body  TEXT,
+    response_body TEXT
+);
+
+ALTER TABLE request_bodies ADD COLUMN request_layout  BLOB;
+ALTER TABLE request_bodies ADD COLUMN response_layout BLOB;
+
+CREATE TABLE IF NOT EXISTS body_chunks (
+    hash BLOB PRIMARY KEY,
+    data BLOB NOT NULL
+) WITHOUT ROWID;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1187,6 +1222,9 @@ impl Store {
         }
         if version < 39 {
             conn.execute_batch(MIGRATION_V39)?;
+        }
+        if version < 40 {
+            conn.execute_batch(MIGRATION_V40)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

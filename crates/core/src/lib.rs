@@ -27,6 +27,7 @@ pub mod cache_experiment;
 pub mod creds;
 pub mod csv;
 pub mod daemon_api;
+pub mod db_file;
 pub mod detect;
 pub mod history;
 pub mod import;

@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub mod agents;
+pub mod bodies;
 pub mod config;
 pub mod health;
 pub mod hub;

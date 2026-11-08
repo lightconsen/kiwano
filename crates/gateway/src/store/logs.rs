@@ -9,7 +9,7 @@
 //! compiles and fails at runtime.
 
 use crate::error::Result;
-use crate::store::Store;
+use crate::store::{bodies, Store};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -275,10 +275,25 @@ impl Store {
         )?;
         let id = tx.last_insert_rowid();
         if r.request_body.is_some() || r.response_body.is_some() {
+            // Bodies go in as chunk layouts, not as text: a session resends its
+            // history every turn, and the same chunks are stored once (see
+            // `store::bodies`). Written in the same transaction as the row, so a
+            // layout can never name chunks that were not committed.
+            let request_layout = r
+                .request_body
+                .as_deref()
+                .map(|b| bodies::store(&tx, b))
+                .transpose()?;
+            let response_layout = r
+                .response_body
+                .as_deref()
+                .map(|b| bodies::store(&tx, b))
+                .transpose()?;
             tx.execute(
-                "INSERT INTO request_bodies (log_id, request_body, response_body)
-                 VALUES (?1, ?2, ?3)",
-                params![id, r.request_body, r.response_body],
+                "INSERT INTO request_bodies
+                     (log_id, request_body, response_body, request_layout, response_layout)
+                 VALUES (?1, NULL, NULL, ?2, ?3)",
+                params![id, request_layout, response_layout],
             )?;
         }
         tx.commit()?;
@@ -376,32 +391,33 @@ impl Store {
     ) -> Result<Vec<RequestLogExportRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
-            "SELECT {REQUEST_LOG_COLUMNS}, b.request_body, b.response_body
+            "SELECT {REQUEST_LOG_COLUMNS}, b.request_body, b.response_body,
+                    b.request_layout, b.response_layout
              FROM request_logs LEFT JOIN request_bodies b ON b.log_id = request_logs.id
              {REQUEST_LOG_WHERE}
              ORDER BY request_logs.id DESC LIMIT ?7",
         ))?;
-        let rows = stmt
-            .query_map(
-                params![
-                    filter.agent,
-                    filter.provider_id,
-                    filter.status,
-                    filter.from,
-                    filter.to,
-                    filter.session_id,
-                    limit
-                ],
-                |row| {
-                    Ok(RequestLogExportRow {
-                        entry: request_log_from_row(row)?,
-                        request_body: row.get(REQUEST_LOG_COLUMN_COUNT)?,
-                        response_body: row.get(REQUEST_LOG_COLUMN_COUNT + 1)?,
-                    })
-                },
-            )?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(rows)
+        let mut reader = bodies::BodyReader::new(&conn);
+        let mut out = Vec::new();
+        let mut rows = stmt.query(params![
+            filter.agent,
+            filter.provider_id,
+            filter.status,
+            filter.from,
+            filter.to,
+            filter.session_id,
+            limit
+        ])?;
+        while let Some(row) = rows.next()? {
+            let stored = StoredBodies::from_row(row, REQUEST_LOG_COLUMN_COUNT)?;
+            let (request_body, response_body) = stored.materialize_with(&mut reader)?;
+            out.push(RequestLogExportRow {
+                entry: request_log_from_row(row)?,
+                request_body,
+                response_body,
+            });
+        }
+        Ok(out)
     }
 
     /// The newest row carrying a credential-watch finding, if any. DLP note
@@ -460,18 +476,122 @@ impl Store {
         let Some(entry) = entry else {
             return Ok(None);
         };
-        let bodies: Option<(Option<String>, Option<String>)> = conn
+        let bodies: Option<StoredBodies> = conn
             .query_row(
-                "SELECT request_body, response_body FROM request_bodies WHERE log_id = ?1",
+                "SELECT request_body, response_body, request_layout, response_layout
+                 FROM request_bodies WHERE log_id = ?1",
                 params![id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |row| StoredBodies::from_row(row, 0),
             )
             .optional()?;
+        let Some(stored) = bodies else {
+            return Ok(Some(RequestLogDetail {
+                entry,
+                request_body: None,
+                response_body: None,
+            }));
+        };
+        let (request_body, response_body) = stored.materialize(&conn)?;
         Ok(Some(RequestLogDetail {
             entry,
-            request_body: bodies.as_ref().and_then(|b| b.0.clone()),
-            response_body: bodies.as_ref().and_then(|b| b.1.clone()),
+            request_body,
+            response_body,
         }))
+    }
+
+    /// Rewrite one batch of pre-v40 body rows into chunk layouts.
+    ///
+    /// Rows older than this migration still hold their bodies as text in
+    /// `request_body`/`response_body`, which is 25 GB on a long-lived install.
+    /// Rewriting that inside the migration would block startup for minutes on
+    /// the very upgrade that is supposed to fix the size, so the rows are
+    /// converted a batch at a time after the daemon is serving: readers handle
+    /// both forms, so nothing waits on this.
+    ///
+    /// Returns how many rows were converted; `0` means the backfill is done.
+    /// Each batch commits on its own, so an interrupted run resumes from
+    /// wherever it stopped rather than starting over.
+    ///
+    /// The converted bytes are freed to SQLite's freelist, not to the disk: the
+    /// file only shrinks with a `VACUUM`, which needs an exclusive lock and so
+    /// cannot run while the daemon holds the database. `kiwano db vacuum` exists
+    /// for that, and says what it is doing.
+    pub fn backfill_body_batch(&self, batch: i64) -> Result<usize> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let pending: Vec<(i64, Option<String>, Option<String>)> = {
+            let mut stmt = tx.prepare(
+                "SELECT log_id, request_body, response_body FROM request_bodies
+                 WHERE request_layout IS NULL AND response_layout IS NULL
+                   AND (request_body IS NOT NULL OR response_body IS NOT NULL)
+                 LIMIT ?1",
+            )?;
+            let rows = stmt
+                .query_map(params![batch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        if pending.is_empty() {
+            tx.commit()?;
+            return Ok(0);
+        }
+
+        {
+            let mut update = tx.prepare_cached(
+                "UPDATE request_bodies
+                    SET request_layout = ?2, response_layout = ?3,
+                        request_body = NULL, response_body = NULL
+                  WHERE log_id = ?1",
+            )?;
+            for (log_id, request, response) in &pending {
+                let request_layout = request
+                    .as_deref()
+                    .map(|b| bodies::store(&tx, b))
+                    .transpose()?;
+                let response_layout = response
+                    .as_deref()
+                    .map(|b| bodies::store(&tx, b))
+                    .transpose()?;
+                update.execute(params![log_id, request_layout, response_layout])?;
+            }
+        }
+        tx.commit()?;
+        Ok(pending.len())
+    }
+
+    /// How many body rows the backfill still has to convert.
+    pub fn pending_body_backfill(&self) -> Result<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM request_bodies
+             WHERE request_layout IS NULL AND response_layout IS NULL
+               AND (request_body IS NOT NULL OR response_body IS NOT NULL)",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// How many distinct chunks are stored, and how many bytes they take.
+    /// The pair that tells an operator what the body store actually costs.
+    pub fn body_chunk_stats(&self) -> Result<(i64, i64)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM body_chunks",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    }
+
+    /// `(page_size, page_count, freelist_count)` — SQLite's own accounting of
+    /// the file. The freelist is space a delete freed and a later write will
+    /// reuse; only `vacuum` returns it to the disk.
+    pub fn page_stats(&self) -> Result<(i64, i64, i64)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let page_size: i64 = conn.pragma_query_value(None, "page_size", |r| r.get(0))?;
+        let page_count: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+        let freelist: i64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
+        Ok((page_size, page_count, freelist))
     }
 
     /// Delete rows older than `retain_days`; bodies cascade. Returns removed count.
@@ -486,15 +606,78 @@ impl Store {
             return Ok(0);
         };
         let cutoff = (Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let n = conn.execute("DELETE FROM request_logs WHERE ts < ?1", params![cutoff])?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let n = tx.execute("DELETE FROM request_logs WHERE ts < ?1", params![cutoff])?;
+        // The deleted rows' chunks are unreachable now. Sweeping in the same
+        // transaction is what makes "pruned" mean the bytes are gone rather
+        // than merely unreferenced.
+        if n > 0 {
+            let removed = bodies::sweep(&tx)?;
+            if removed > 0 {
+                tracing::info!(chunks = removed, "unreferenced body chunks collected");
+            }
+        }
+        tx.commit()?;
         Ok(n)
     }
 
     /// Delete every logged request (GUI "clear log" action).
     pub fn clear_request_logs(&self) -> Result<usize> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute("DELETE FROM request_logs", [])?)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let n = tx.execute("DELETE FROM request_logs", [])?;
+        bodies::sweep(&tx)?;
+        tx.commit()?;
+        Ok(n)
+    }
+}
+
+/// The two body columns in whichever form the row carries them.
+///
+/// A row written before v40 has text and no layout; a row written after has a
+/// layout and no text; a row the backfill has not reached yet has text only and
+/// is read as text. Every reader goes through this, so none of them has to know
+/// which side of the upgrade a row came from.
+struct StoredBodies {
+    request_text: Option<String>,
+    response_text: Option<String>,
+    request_layout: Option<Vec<u8>>,
+    response_layout: Option<Vec<u8>>,
+}
+
+impl StoredBodies {
+    /// Read the four body columns starting at `base` — `0` for a query that
+    /// selects only them, `REQUEST_LOG_COLUMN_COUNT` for one that joins them
+    /// after the log's own columns.
+    fn from_row(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<Self> {
+        Ok(StoredBodies {
+            request_text: row.get(base)?,
+            response_text: row.get(base + 1)?,
+            request_layout: row.get(base + 2)?,
+            response_layout: row.get(base + 3)?,
+        })
+    }
+
+    /// The detail view: one row, one connection, no cache worth keeping.
+    fn materialize(self, conn: &rusqlite::Connection) -> Result<(Option<String>, Option<String>)> {
+        let mut reader = bodies::BodyReader::new(conn);
+        self.materialize_with(&mut reader)
+    }
+
+    fn materialize_with(
+        self,
+        reader: &mut bodies::BodyReader<'_>,
+    ) -> Result<(Option<String>, Option<String>)> {
+        let request = match (self.request_layout, self.request_text) {
+            (Some(layout), _) => Some(reader.read(&layout)?),
+            (None, text) => text,
+        };
+        let response = match (self.response_layout, self.response_text) {
+            (Some(layout), _) => Some(reader.read(&layout)?),
+            (None, text) => text,
+        };
+        Ok((request, response))
     }
 }
 

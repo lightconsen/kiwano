@@ -17,6 +17,68 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [Unreleased]
+
+**The version where a captured body is stored once instead of once per turn.**
+The request log keeps the bodies it forwards, and on a machine that drives a
+chat client it had grown to tens of gigabytes. The reason is structural, not a
+leak: a chat client resends the whole conversation on every turn, so a long
+session posts the same growing prefix thousands of times and every copy was
+stored in full — one session here had 12,347 turns, and two sessions held 63%
+of everything ever logged. Retention could not help, because the newest bodies
+were the largest.
+
+A body is now split into content-defined chunks (a rolling hash, boundaries
+that resynchronise after an edit rather than shifting every byte behind it),
+and each chunk is stored once, compressed with zstd, keyed by its own hash —
+2,880 MiB of real bodies from 4,001 requests came to 40.8 MiB (**70x**), and
+that ratio survives the per-row layouts. What the row keeps is the ordered list
+of chunk hashes: sixteen bytes per chunk, a few hundred bytes for a megabyte
+body. Measured end to end on a copy of the real database, 616 MiB of bodies
+were held in 9.4 MiB of chunks; after the conversion and a compaction the whole
+file went from 657 MiB to 20 MiB, and the rows read back byte for byte through
+both the detail and the export paths.
+
+Existing databases convert themselves. Schema v40 adds the layout columns and
+the chunk table; rows written before it keep their text and still read
+normally, and a background task converts them 200 rows at a time after
+startup, so the first run after the upgrade neither blocks nor doubles the
+file's size in one go.
+
+### Added
+
+- **`kiwano db stats`** — the file's footprint, what is in use, what is free,
+  the chunk table's size and whether the conversion has finished. It reads over
+  the admin plane, because the CLI still never opens the daemon's database.
+- **`kiwano db vacuum [--dry-run]`** — compact the file, reclaiming the pages
+  freed by pruning. `VACUUM` needs an exclusive lock, so this refuses while the
+  gateway is running (and says to stop it first) rather than risk rewriting a
+  file that is being served.
+- **`GET /api/db/stats`** on the admin plane, which is what the command above
+  reads.
+
+### Fixed
+
+- **Reading the admin token no longer opens the database for writing.** The
+  lookup went through `Store::open`, which migrates — so any client that asked
+  its daemon for a token was also the process that upgraded the schema, and a
+  test run with no database path set resolved the real install's file and moved
+  it forward. The lookup is now a read-only connection over the two rows it
+  needs, and two tests pin it: one that the schema and table set are unchanged
+  afterwards, one that a token still sitting in the write-ahead log (where it is
+  until the daemon checkpoints) is still read.
+
+### Changed
+
+- **`request_bodies` stores layouts, not text** (schema v40). The
+  `request_body` / `response_body` columns stay, holding the text of rows that
+  have not been converted yet.
+- **A prune or a cleared log now collects the chunks nothing refers to.** The
+  collection is a mark-and-sweep run inside the same transaction: it reads
+  every stored layout, then deletes the chunk hashes it did not see. There are
+  no reference counts, so a chunk leaked by any path is reclaimed the next time
+  anything sweeps.
+
 ## [0.4.13] - 2026-11-07
 
 **The version where a provider's page says how full the window was.** A

@@ -70,6 +70,13 @@ impl DaemonApi {
         Self { endpoint, token }
     }
 
+    /// What the store holds, and what each part of it costs — `kiwano db stats`.
+    /// Served by the daemon because the CLI must not open the database itself
+    /// (`crates/cli/tests/one_writer.rs`).
+    pub fn db_stats(&self) -> Result<serde_json::Value, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/db/stats")
+    }
+
     /// A provider's key pool, masked — `vm::list_api_keys`, served by the daemon.
     pub fn list_api_keys(&self, provider_id: &str) -> Result<Vec<ApiKeyVm>, String> {
         sidecar::admin_get_json(

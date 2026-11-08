@@ -17,6 +17,17 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [Unreleased]
+
+### Added
+
+- **Settings reports what the database costs on disk.** A row under **Local
+  gateway** reads the store's footprint — `kiwano.db` plus the `-wal` and `-shm`
+  beside it — in B/KB/MB/GB, through the same helper `kiwano db stats` uses, so
+  the app and the CLI cannot disagree about it. The number is read when the page
+  loads rather than polled: the file changes by bytes per request, and digits
+  moving under a reader would report traffic rather than size.
+
 ## [0.4.14] - 2026-11-08
 
 **The version where a captured body is stored once instead of once per turn.**

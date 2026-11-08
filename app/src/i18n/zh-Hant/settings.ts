@@ -31,6 +31,8 @@ export const settings = {
   logBodyCapNote: "超過此大小的請求主體會截斷儲存。它同時是單一條串流回應在記憶體中駐留的上限。",
   noLimit: "不限制",
   mb: "{count} MB",
+  database: "資料庫大小",
+  databaseNote: "閘道存在本機的 SQLite 檔案，含其預寫日誌",
   streamFirstByte: "首位元組等待",
   streamFirstByteNote:
     "上游回傳回應標頭後就不再送出內容時，放棄該次請求。本機冷啟動的模型可能較慢 —— 可調大或關閉",

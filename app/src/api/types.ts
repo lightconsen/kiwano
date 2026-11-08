@@ -756,6 +756,12 @@ export interface FooterStats {
   version: string;
 }
 
+/** What the gateway's database costs on this disk. */
+export interface DbUsage {
+  /** `kiwano.db` plus the `-wal`/`-shm` beside it. */
+  file_bytes: number;
+}
+
 /** CC Switch import result (tech.md §4.5: v3.x only) */
 export interface ImportReport {
   imported: number;
@@ -1297,6 +1303,8 @@ export interface KiwanoApi {
   /** Reveal the app's log directory in the OS file manager */
   openLogFolder(): Promise<void>;
   getFooterStats(): Promise<FooterStats>;
+  /** The store's footprint on disk, for the Settings row */
+  getDbUsage(): Promise<DbUsage>;
   /** Check GitHub Releases for a newer version; null = up to date */
   checkAppUpdate(): Promise<UpdateInfo | null>;
   /** Update found by the silent startup check; null = none found (or disabled) */

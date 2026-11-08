@@ -19,6 +19,21 @@ export function fmtMB(bytes: number): string {
   return `${mb >= 100 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
 }
 
+/** A file's size, in the unit it is actually worth reading in: B, KB, MB, GB.
+ *
+ * Unlike [`fmtMB`] — an installer is always MB-scale — a database starts at a
+ * few kilobytes and, on a machine that logs bodies, reaches tens of gigabytes.
+ * One decimal below ten so 1.4 GB does not read as 1 GB; whole numbers above
+ * it, where the fraction is noise. Units are not translated, same as `MB`. */
+export function fmtBytes(bytes: number): string {
+  const unit = (value: number, suffix: string) =>
+    `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10} ${suffix}`;
+  if (bytes >= 1_000_000_000) return unit(bytes / 1_000_000_000, "GB");
+  if (bytes >= 1_000_000) return unit(bytes / 1_000_000, "MB");
+  if (bytes >= 1_000) return unit(bytes / 1_000, "KB");
+  return `${Math.round(bytes)} B`;
+}
+
 export function fmtLatency(ms: number | null): string {
   if (ms == null) return "—";
   return ms >= 1000 ? `${Math.round(ms / 100) / 10}s` : `${ms}ms`;

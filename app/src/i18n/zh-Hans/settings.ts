@@ -31,6 +31,8 @@ export const settings = {
   logBodyCapNote: "超过该大小的请求体会被截断存储。它也是单条流式响应在内存在驻留的上限。",
   noLimit: "不限制",
   mb: "{count} MB",
+  database: "数据库大小",
+  databaseNote: "网关存在本机的 SQLite 文件，含其预写日志",
   streamFirstByte: "首字节等待",
   streamFirstByteNote:
     "上游返回响应头后再无内容时放弃该次请求。本地冷启动模型可能较慢 —— 可调大或关闭",

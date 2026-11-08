@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
-import { fmtMB } from "../lib/format";
+import { fmtBytes, fmtMB } from "../lib/format";
 import { releaseNotesFor } from "../lib/releaseNotes";
 import { useReload } from "../lib/reload";
 import { applyTheme, THEME_SYSTEM } from "../lib/theme";
@@ -200,6 +200,8 @@ export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [currencies, setCurrencies] = useState<string[]>([]);
   const [version, setVersion] = useState("");
+  /** The store's footprint on disk, or null until it has been read. */
+  const [dbBytes, setDbBytes] = useState<number | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   // Both the download state and its error belong to lib/updateInstall: the
@@ -226,7 +228,13 @@ export default function Settings() {
       .getFooterStats()
       .then((f) => setVersion(f.version))
       .catch(() => {});
-    return Promise.all([settings, currencies, stats]);
+    // A store that cannot be measured (no file yet, an unreadable path) leaves
+    // the row reading "none" rather than failing the whole screen.
+    const db = api
+      .getDbUsage()
+      .then((u) => setDbBytes(u.file_bytes))
+      .catch(() => {});
+    return Promise.all([settings, currencies, stats, db]);
   }, []);
   useReload(reload);
 
@@ -462,6 +470,14 @@ export default function Settings() {
               bytes={s.log_max_body_bytes ?? 0}
               onChange={(v) => patch({ log_max_body_bytes: v })}
             />
+          </Row>
+          {/* What the two knobs above cost. Read when the page loads rather
+              than polled: the file changes by bytes per request, and a number
+              that ticks under a reader is noise, not feedback. */}
+          <Row label={t("settings.database")} note={t("settings.databaseNote")}>
+            <span className="font-mono text-mut">
+              {dbBytes === null ? t("common.none") : fmtBytes(dbBytes)}
+            </span>
           </Row>
           {/* A finding is written into the request log, which is why the note
               says so: with logging off there is nowhere for one to go, and the

@@ -20,6 +20,7 @@ const { apiMock } = vi.hoisted(() => ({
     getSettings: vi.fn(),
     getCurrencyMeta: vi.fn(),
     getFooterStats: vi.fn(),
+    getDbUsage: vi.fn(),
     getPendingUpdate: vi.fn(),
     updateSettings: vi.fn(),
     openLogFolder: vi.fn(),
@@ -99,6 +100,7 @@ beforeEach(() => {
     today_tokens: 0,
     hub_synced: false,
   });
+  apiMock.getDbUsage.mockResolvedValue({ file_bytes: 670_300_000 });
   apiMock.getPendingUpdate.mockResolvedValue(null);
 });
 
@@ -137,6 +139,30 @@ describe("the agent takeover row", () => {
 // and both have to render it as itself: a row reading "0 days" or "0 MB" while
 // nothing is being pruned or truncated is a row that says the opposite of what
 // the gateway is doing.
+// What the store costs on disk. The number is read once per page load: it is a
+// fact about the file, not a setting, and a row whose digits move under a reader
+// would be reporting traffic rather than size.
+describe("the database row", () => {
+  it("reports the store's footprint in the unit it is worth reading in", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    render(<Settings />);
+
+    expect(await screen.findByText(en.settings.database)).toBeInTheDocument();
+    expect(screen.getByText("670 MB")).toBeInTheDocument();
+  });
+
+  it("reads as none when the file cannot be measured", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.getDbUsage.mockRejectedValue(new Error("no such file"));
+    render(<Settings />);
+
+    // The rest of the page still renders: a footprint that cannot be read is
+    // not a reason to lose the settings beside it.
+    expect(await screen.findByText(en.settings.database)).toBeInTheDocument();
+    expect(screen.getByText(en.common.none)).toBeInTheDocument();
+  });
+});
+
 describe("the theme row", () => {
   it("offers System beside the two fixed colours, and stores the choice", async () => {
     apiMock.getSettings.mockResolvedValue(settingsWith(true));

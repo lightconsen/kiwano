@@ -2,7 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, UpstreamKeySpendEntry, AppSettings, Session, SessionList, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, UpstreamKeySpendEntry, AppSettings, Session, SessionList, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, DbUsage, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -203,6 +203,8 @@ export const tauriApi: KiwanoApi = {
   openLogFolder: () => invoke<void>("open_log_folder"),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
+
+  getDbUsage: () => invoke<DbUsage>("get_db_usage"),
 
   checkAppUpdate: () => invoke<UpdateInfo | null>("check_app_update"),
 

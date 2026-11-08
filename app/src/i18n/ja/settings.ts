@@ -33,6 +33,8 @@ export const settings = {
   logBodyCapNote: "これより大きい本文は切り詰めて保存されます。1つのストリームがメモリに保持できる量でもあります。",
   noLimit: "上限なし",
   mb: "{count} MB",
+  database: "データベースサイズ",
+  databaseNote: "ゲートウェイがこのマシンに持つ SQLite ファイル（書き込み前ログを含む）",
   streamFirstByte: "先頭バイトの待機",
   streamFirstByteNote:
     "ヘッダーを返したあとに何も送ってこない上流は諦めます。ローカルモデルのコールドスタートは時間がかかることがあるため、値を上げるか、オフにしてください",

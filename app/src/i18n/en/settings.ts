@@ -37,6 +37,8 @@ export const settings = {
   logBodyCapNote: "Larger bodies are stored truncated. Also the memory one stream may hold.",
   noLimit: "No limit",
   mb: "{count} MB",
+  database: "Database size",
+  databaseNote: "The gateway's SQLite file on this disk, including its write-ahead log",
   streamFirstByte: "First-byte wait",
   streamFirstByteNote:
     "Give up on an upstream that returns headers and then sends nothing. A cold local model can take a while — raise it, or turn it off",

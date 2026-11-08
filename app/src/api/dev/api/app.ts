@@ -2,7 +2,14 @@
 // updater — which is everything here that is not about a provider, an agent, a
 // log or a setting.
 
-import type { ConfigShareReport, FooterStats, KiwanoApi, UpdateInfo, UpdateProgress } from "../../types";
+import type {
+  ConfigShareReport,
+  DbUsage,
+  FooterStats,
+  KiwanoApi,
+  UpdateInfo,
+  UpdateProgress,
+} from "../../types";
 import { delay } from "../delay";
 // app/package.json is the version source of truth (`scripts/release.sh` bumps it).
 import pkg from "../../../../package.json";
@@ -28,6 +35,7 @@ export const appApi: Pick<
   | "exportConfig"
   | "importConfig"
   | "getFooterStats"
+  | "getDbUsage"
   | "checkAppUpdate"
   | "getPendingUpdate"
   | "downloadAndInstallAppUpdate"
@@ -46,6 +54,13 @@ export const appApi: Pick<
   async getFooterStats(): Promise<FooterStats> {
     await delay();
     return { ...footerStats };
+  },
+
+  async getDbUsage(): Promise<DbUsage> {
+    await delay();
+    // A plausible file for the demo: the footer says 1,284 requests today, and
+    // a store that has been collecting bodies for a while is a few hundred MB.
+    return { file_bytes: 214_300_000 };
   },
 
   async checkAppUpdate(): Promise<UpdateInfo | null> {

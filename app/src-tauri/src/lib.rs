@@ -30,6 +30,7 @@ pub mod alerts;
 pub mod catalog;
 pub mod daemon;
 pub mod dashboard;
+pub mod db;
 pub mod history;
 pub mod hub;
 pub mod keys;
@@ -82,6 +83,7 @@ pub use alerts::check_usage_alerts;
 pub use catalog::{list_catalog, list_model_prices, open_url};
 pub use daemon::get_gateway_status;
 pub use dashboard::get_dashboard;
+pub use db::get_db_usage;
 pub use history::history_import;
 pub use hub::sync_hub;
 pub use keys::{add_api_key, delete_api_key, key_pool_spend, list_api_keys};
@@ -291,6 +293,7 @@ pub fn run() {
             list_models,
             list_catalog,
             get_dashboard,
+            get_db_usage,
             get_settings,
             update_settings,
             list_request_logs,

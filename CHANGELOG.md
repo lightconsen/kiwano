@@ -17,7 +17,7 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
-## [Unreleased]
+## [0.4.14] - 2026-11-08
 
 **The version where a captured body is stored once instead of once per turn.**
 The request log keeps the bodies it forwards, and on a machine that drives a
@@ -30,14 +30,13 @@ were the largest.
 
 A body is now split into content-defined chunks (a rolling hash, boundaries
 that resynchronise after an edit rather than shifting every byte behind it),
-and each chunk is stored once, compressed with zstd, keyed by its own hash —
-2,880 MiB of real bodies from 4,001 requests came to 40.8 MiB (**70x**), and
-that ratio survives the per-row layouts. What the row keeps is the ordered list
-of chunk hashes: sixteen bytes per chunk, a few hundred bytes for a megabyte
-body. Measured end to end on a copy of the real database, 616 MiB of bodies
-were held in 9.4 MiB of chunks; after the conversion and a compaction the whole
-file went from 657 MiB to 20 MiB, and the rows read back byte for byte through
-both the detail and the export paths.
+and each chunk is stored once, compressed with zstd, keyed by its own hash.
+What the row keeps is the ordered list of chunk hashes: sixteen bytes per
+chunk, a few hundred bytes for a megabyte body. Measured end to end on this
+machine's own database, 25.1 GiB of bodies from 32,338 requests became 278.7 MB
+of chunks (**92x**), and after the conversion and a compaction the whole file
+went from 25.9 GB to 660 MB. The rows read back byte for byte through both the
+detail and the export paths.
 
 Existing databases convert themselves. Schema v40 adds the layout columns and
 the chunk table; rows written before it keep their text and still read

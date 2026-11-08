@@ -49,6 +49,9 @@ export const logs = {
   detailResponseBody: "レスポンス本文",
   detailClientStream: " （クライアントから見えるストリーム）",
 
+  copiedToClipboard: "クリップボードにコピーしました",
+  copyFailed: "コピーできませんでした",
+
   exportDialogTitle: "ログをエクスポート",
   dateRange: "日付範囲",
   exportNote: "範囲内のすべてのリクエストが書き出されます。画面に表示されている {n} 件だけではありません。",

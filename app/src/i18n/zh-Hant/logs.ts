@@ -49,6 +49,9 @@ export const logs = {
   detailResponseBody: "回應內文",
   detailClientStream: "（用戶端可見的串流）",
 
+  copiedToClipboard: "已複製到剪貼簿",
+  copyFailed: "複製失敗",
+
   exportDialogTitle: "匯出日誌",
   dateRange: "日期範圍",
   exportNote: "範圍內的每個請求都會寫入，不只是畫面上的 {n} 筆。",

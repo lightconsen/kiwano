@@ -1,9 +1,9 @@
 // One request log's own page: what a row click leaves to. The table's tests
 // stop at "the row asks the Dashboard to navigate"; these pin what that page
 // shows — the record, the two note blocks split apart, and the way back.
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/i18n/en";
 import type { RequestLogDetail } from "@/api/types";
@@ -55,6 +55,22 @@ function detail(over: Partial<RequestLogDetail> = {}): RequestLogDetail {
 beforeEach(() => {
   vi.clearAllMocks();
   window.location.hash = "";
+});
+
+/** jsdom ships no clipboard, and `copyText` (RequestLogs.tsx) tries the
+    gesture-safe `execCommand` path first. These tests supply exactly that and
+    leave the async fallback out of it. */
+function grantClipboard(ok: boolean) {
+  Object.defineProperty(document, "execCommand", {
+    value: vi.fn(() => ok),
+    configurable: true,
+  });
+  Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(document, "execCommand");
+  Reflect.deleteProperty(navigator, "clipboard");
 });
 
 describe("a request log's page", () => {
@@ -124,5 +140,49 @@ describe("a request log's page", () => {
     await user.click(expand);
     expect(pre.textContent!.length).toBe(big.length);
     expect(screen.queryByRole("button", { name: en.logs.detailBodyExpand })).toBeNull();
+  });
+});
+
+describe("the Copy button", () => {
+  // `fireEvent`, not `userEvent`: user-event installs its own clipboard stub on
+  // `navigator`, which `copyText` would then accept — the very path the webview
+  // does not have, and the one these tests need to leave empty.
+  it("says what it did, in words that outlast the gesture", async () => {
+    grantClipboard(true);
+    apiMock.getRequestLog.mockResolvedValue(detail());
+    render(<LogDetail logId={99} />);
+    const button = await screen.findByRole("button", { name: en.common.copy });
+
+    // Fake timers before the click: the notice's timeout is armed by it, and a
+    // timer armed on the real clock is not the one advanced below.
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(button);
+      const status = screen.getByRole("status");
+      expect(status).toHaveTextContent(en.logs.copiedToClipboard);
+
+      // Copying again re-arms the four seconds: three seconds later it must
+      // still be up, though the first click's deadline has passed.
+      act(() => vi.advanceTimersByTime(3000));
+      fireEvent.click(button);
+      act(() => vi.advanceTimersByTime(3000));
+      expect(status).toHaveTextContent(en.logs.copiedToClipboard);
+
+      // Four seconds after the last click, the page stops claiming anything.
+      act(() => vi.advanceTimersByTime(1000));
+      expect(status).toHaveTextContent(/^$/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says so when the clipboard refused", async () => {
+    grantClipboard(false);
+    apiMock.getRequestLog.mockResolvedValue(detail());
+    render(<LogDetail logId={99} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: en.common.copy }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(en.logs.copyFailed);
   });
 });

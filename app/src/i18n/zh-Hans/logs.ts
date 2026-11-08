@@ -49,6 +49,9 @@ export const logs = {
   detailResponseBody: "响应正文",
   detailClientStream: "（客户端可见的流）",
 
+  copiedToClipboard: "已复制到剪贴板",
+  copyFailed: "复制失败",
+
   exportDialogTitle: "导出日志",
   dateRange: "日期范围",
   exportNote: "范围内每个请求都会写入，而不仅是屏幕上的 {n} 条。",

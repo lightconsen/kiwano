@@ -61,6 +61,11 @@ export const logs = {
   detailResponseBody: "RESPONSE BODY",
   detailClientStream: " (client-visible stream)",
 
+  /** The Copy button's answer. The tick inside the button is the instant
+      response; these words are what a reader who looked away can still catch. */
+  copiedToClipboard: "Copied to clipboard",
+  copyFailed: "Copy failed",
+
   exportDialogTitle: "Export logs",
   dateRange: "DATE RANGE",
   exportNote: "Every request in the range is written, not just the {n} on screen.",

@@ -42,7 +42,12 @@ export default function LogDetail({
   const [row, setRow] = useState<RequestLogDetail | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  // What the click on Copy did, in words beside the button — the icon inside it
+  // is the instant response, this is the one a reader catches after looking
+  // away from the gesture. A fresh object per click, so clicking again while the
+  // words are still up arms a new four seconds instead of inheriting the old
+  // deadline.
+  const [copyState, setCopyState] = useState<{ what: "copied" | "failed" } | null>(null);
 
   // Read by id: the page is what replaces the list, and a deep link or a
   // refresh arrives with nothing else.
@@ -73,14 +78,22 @@ export default function LogDetail({
     if (main) main.scrollTop = 0;
   }, [logId]);
 
+  // Four seconds, the same budget the log table gives its export line
+  // (RequestLogs.tsx): long enough to read after the gesture, short enough that
+  // it does not outlive the fact it reports.
+  useEffect(() => {
+    if (!copyState) return;
+    // Named `timer`, not `t`: `t` is the translator here.
+    const timer = window.setTimeout(() => setCopyState(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
+
   const onCopy = () => {
+    if (!row) return;
     // Synchronous inside the gesture: the detail is already loaded here, so
     // nothing may await before the clipboard write (WKWebView ends the user
     // activation window at the first await).
-    if (row && copyText(fmtLogText(row, row))) {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    }
+    setCopyState({ what: copyText(fmtLogText(row, row)) ? "copied" : "failed" });
   };
 
   const title = t("logs.logTitle", { id: logId });
@@ -140,16 +153,39 @@ export default function LogDetail({
               </div>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 shrink-0 gap-1 px-2.5 text-[11px] text-mut"
-            disabled={!row}
-            onClick={onCopy}
-          >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copied ? t("common.copied") : t("common.copy")}
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* `role="status"` so the words reach a screen reader too: the
+                button's label does not change, and nothing else on the page
+                would announce the click. The element stays mounted (empty) so
+                the change of its contents is what gets announced. */}
+            <span
+              role="status"
+              className="text-[11px]"
+              style={{ color: copyState?.what === "failed" ? "var(--red)" : "var(--kiwi)" }}
+            >
+              {copyState?.what === "failed"
+                ? t("logs.copyFailed")
+                : copyState?.what === "copied"
+                  ? t("logs.copiedToClipboard")
+                  : ""}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 gap-1 px-2.5 text-[11px] text-mut"
+              disabled={!row}
+              onClick={onCopy}
+            >
+              {/* The tick is the in-place response; the word stays "Copy" so the
+                  button does not move its own goalpost mid-gesture. */}
+              {copyState?.what === "copied" ? (
+                <Check className="h-3 w-3" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+              {t("common.copy")}
+            </Button>
+          </div>
         </div>
 
         {err ? (

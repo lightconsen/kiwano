@@ -28,6 +28,12 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   loads rather than polled: the file changes by bytes per request, and digits
   moving under a reader would report traffic rather than size.
 
+- **A request log's Copy button says what it did.** The answer to the click is
+  now a line beside the button — *Copied to clipboard* for four seconds, *Copy
+  failed* when the clipboard refuses — instead of only the button's own label
+  turning to "Copied" for 1.2 seconds. The line is a `role="status"` region, so
+  a screen reader hears it without focus moving.
+
 ## [0.4.14] - 2026-11-08
 
 **The version where a captured body is stored once instead of once per turn.**

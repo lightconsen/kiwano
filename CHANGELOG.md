@@ -52,6 +52,14 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   timed against the document, so one inserted long after load fills frozen at
   its end value and never appears to move.
 
+- **The agent's wire is drawn like the route it feeds.** Agent → Kiwano used
+  to be a plain grey line whatever the route was doing, so a live route read
+  as a grey wire feeding a green one. It now follows the candidates' own rule:
+  kiwi with the faint glow while something on the other side of the gateway is
+  serving this agent, neutral while nothing on it can. Standby legs keep their
+  dimmer grey — they are not carrying traffic — so the contrast still says
+  which candidate is the one in use.
+
 ## [0.4.14] - 2026-11-08
 
 **The version where a captured body is stored once instead of once per turn.**

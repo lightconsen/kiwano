@@ -644,6 +644,38 @@ describe("the agent tab's two views", () => {
     expect(within(graph).getByText(`42 ${en.providers.unitReq}`)).toBeInTheDocument();
   });
 
+  it("draws the agent's wire in the same grammar as the candidates' legs", async () => {
+    // One route, drawn by one rule: the wire from the agent is kiwi while
+    // something on the other side of the gateway is serving this agent, and
+    // neutral while nothing is — the same two states a leg has. Before this,
+    // the trunk was always grey, so a live route read as a grey wire feeding a
+    // green one.
+    const user = userEvent.setup();
+    // The trunk is drawn in two layers — the faint glow, then the line — and
+    // the line is the one whose colour means anything.
+    const trunk = () =>
+      screen
+        .getByRole("img", { name: graphAria(en.strategy.single, 1) })
+        .querySelectorAll("svg > path")[1]!;
+
+    const live = renderCodexTab({
+      providers: [deepseek()], // serving_agents: ["codex"]
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await user.click(await screen.findByRole("button", { name: en.providers.viewGraph }));
+    expect(trunk().getAttribute("stroke")).toBe("var(--kiwi)");
+    live.unmount();
+
+    renderCodexTab({
+      providers: [deepseek({ serving_agents: [] })],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await user.click(await screen.findByRole("button", { name: en.providers.viewGraph }));
+    expect(trunk().getAttribute("stroke")).toBe("var(--line)");
+  });
+
   it("sends a light from the agent through the gateway to the candidate", async () => {
     const user = userEvent.setup();
     apiMock.testProviderLatency.mockResolvedValue(undefined);

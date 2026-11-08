@@ -248,6 +248,16 @@ export function RouteGraph({
     .filter(Boolean)
     .join(" · ");
 
+  // "Serving", for the wire from the agent: the trunk carries traffic exactly
+  // when something on the other side of the gateway takes it, so it is judged
+  // by the candidates rather than on its own. One rule for the whole route —
+  // a green trunk feeding grey legs would read as a route that is half open.
+  const anyServing = candidates.some(({ b }) =>
+    byId.get(b.provider_id)!.serving_agents.includes(agent),
+  );
+  /** The agent's own wire, which every candidate's leg attaches to. */
+  const trunk = `M ${AGENT_EDGE} ${hubY} L ${HUB_X - 22} ${hubY}`;
+
   return (
     <div
       className="relative mx-10 my-4 overflow-x-auto"
@@ -269,11 +279,26 @@ export function RouteGraph({
           preserveAspectRatio="none"
           aria-hidden="true"
         >
+          {/* The trunk, in the same two layers and under the same rules as a
+              candidate's leg: kiwi with the faint glow while this agent's route
+              is serving, neutral at rest when nothing on it can. The route is
+              one path, and drawing half of it in a different grammar made it
+              look like the two halves were unrelated. */}
           <path
-            d={`M ${AGENT_EDGE} ${hubY} L ${HUB_X - 22} ${hubY}`}
+            d={trunk}
             fill="none"
-            stroke="var(--line)"
-            strokeWidth="1.5"
+            stroke="var(--kiwi)"
+            strokeWidth="5"
+            strokeLinecap="round"
+            strokeOpacity={anyServing ? 0.18 : 0}
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            d={trunk}
+            fill="none"
+            stroke={anyServing ? "var(--kiwi)" : "var(--line)"}
+            strokeWidth={anyServing ? 2 : 1.5}
+            opacity={anyServing ? 1 : 0.55}
             vectorEffect="non-scaling-stroke"
           />
           {bindings.map((b, i) => {

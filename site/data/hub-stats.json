@@ -1,8 +1,50 @@
 {
-  "generated_at": "2026-11-02T18:16:06+00:00",
+  "generated_at": "2026-11-09T18:43:08+00:00",
   "source": "github-release-assets",
-  "note": "installer downloads summed over 50 releases. Every release's mirror-verification step fetches each asset once (~5 per release), so the honest count is the sum minus that floor. Downloads are not installs: retries, abandoned downloads and install.sh users are all invisible here.",
+  "note": "installer downloads summed over 57 releases. Every release's mirror-verification step fetches each asset once (~5 per release), so the honest count is the sum minus that floor. Downloads are not installs: retries, abandoned downloads and install.sh users are all invisible here.",
   "releases": [
+    {
+      "tag": "v0.4.16",
+      "published": "2026-11-09T11:53:36Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.4.15",
+      "published": "2026-11-09T02:05:49Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.4.14",
+      "published": "2026-11-08T14:06:10Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.4.13",
+      "published": "2026-11-07T01:03:21Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.4.12",
+      "published": "2026-11-04T03:37:39Z",
+      "installer_downloads": 8,
+      "estimate_minus_ci_floor": 3
+    },
+    {
+      "tag": "v0.4.11",
+      "published": "2026-11-03T11:51:52Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.4.10",
+      "published": "2026-11-03T07:09:21Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
     {
       "tag": "v0.4.9",
       "published": "2026-11-02T15:04:22Z",
@@ -96,8 +138,8 @@
     {
       "tag": "v0.3.7",
       "published": "2026-10-23T05:31:55Z",
-      "installer_downloads": 24,
-      "estimate_minus_ci_floor": 19
+      "installer_downloads": 32,
+      "estimate_minus_ci_floor": 27
     },
     {
       "tag": "v0.3.6",
@@ -305,8 +347,8 @@
     }
   ],
   "totals": {
-    "installer_downloads": 974,
-    "ci_noise_floor": 250,
-    "estimate_minus_ci_floor": 724
+    "installer_downloads": 1032,
+    "ci_noise_floor": 285,
+    "estimate_minus_ci_floor": 747
   }
 }

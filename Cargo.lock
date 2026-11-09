@@ -2586,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "axum",
  "clap",
@@ -2601,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-adapters"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "async-stream",
  "base64 0.22.1",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-api"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "serde",
  "serde_json",
@@ -2638,7 +2638,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-app"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "kiwano-api",
  "kiwano-core",
@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-core"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -2683,7 +2683,7 @@ dependencies = [
 
 [[package]]
 name = "kiwanod"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "axum",
  "chrono",

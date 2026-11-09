@@ -57,9 +57,9 @@ beforeEach(() => {
   window.location.hash = "";
 });
 
-/** jsdom ships no clipboard, and `copyText` (RequestLogs.tsx) tries the
-    gesture-safe `execCommand` path first. These tests supply exactly that and
-    leave the async fallback out of it. */
+/** jsdom ships no clipboard and is not Tauri, so `copyText`
+    (`lib/clipboard.ts`) lands on its legacy `execCommand` path. These tests
+    supply exactly that and leave the async API out of it. */
 function grantClipboard(ok: boolean) {
   Object.defineProperty(document, "execCommand", {
     value: vi.fn(() => ok),
@@ -158,6 +158,9 @@ describe("the Copy button", () => {
     vi.useFakeTimers();
     try {
       fireEvent.click(button);
+      // The write is a promise now (one native call in the app); the notice is
+      // set when it settles.
+      await act(async () => {});
       const status = screen.getByRole("status");
       expect(status).toHaveTextContent(en.logs.copiedToClipboard);
 
@@ -165,6 +168,7 @@ describe("the Copy button", () => {
       // still be up, though the first click's deadline has passed.
       act(() => vi.advanceTimersByTime(3000));
       fireEvent.click(button);
+      await act(async () => {});
       act(() => vi.advanceTimersByTime(3000));
       expect(status).toHaveTextContent(en.logs.copiedToClipboard);
 
@@ -182,7 +186,25 @@ describe("the Copy button", () => {
     render(<LogDetail logId={99} />);
 
     fireEvent.click(await screen.findByRole("button", { name: en.common.copy }));
+    await act(async () => {});
 
     expect(screen.getByRole("status")).toHaveTextContent(en.logs.copyFailed);
+  });
+
+  it("refuses a body too big for the webview's own copy instead of freezing", async () => {
+    // `execCommand` lays the whole selection out on the main thread, and its
+    // cost grows faster than the string: a multi-megabyte body is minutes of
+    // frozen window. The app copies natively; this is the web path's guard.
+    const exec = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    apiMock.getRequestLog.mockResolvedValue(detail({ request_body: "x".repeat(300 * 1024) }));
+    render(<LogDetail logId={99} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: en.common.copy }));
+    await act(async () => {});
+
+    expect(screen.getByRole("status")).toHaveTextContent(en.logs.copyFailed);
+    expect(exec).not.toHaveBeenCalled();
   });
 });

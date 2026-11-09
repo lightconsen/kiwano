@@ -158,31 +158,6 @@ export function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): str
   return lines.join("\n");
 }
 
-/** Synchronous clipboard write. WKWebView has no navigator.clipboard and only
-    honors execCommand copies made inside the user gesture, so the legacy
-    textarea path runs first; the async Clipboard API is the fallback. */
-export function copyText(text: string): boolean {
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    if (ok) return true;
-  } catch {
-    // fall through to the async path
-  }
-  try {
-    void navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function StatusPill({ code }: { code: number }) {
   const ok = code < 400;
   return (

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useT } from "../../i18n";
+import { copyText } from "../../lib/clipboard";
 
 /** A value and the button that copies it. The button is an icon: these are short
     values, and a word beside each of them competes with the thing being copied. */
@@ -12,15 +13,15 @@ export function CopyValue({ value }: { value: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    // No clipboard in a browser without a user gesture (or in a test): a copy
-    // that cannot happen must not take the row down with it.
-    navigator.clipboard?.writeText(value).then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1200);
-      },
-      () => {},
-    );
+    // A copy that cannot happen must not take the row down with it: the tick
+    // only appears when the clipboard actually took the value. (This used to go
+    // through `navigator.clipboard` directly, which WKWebView does not provide —
+    // so in the app the click did nothing at all. See `lib/clipboard.ts`.)
+    void copyText(value).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
   };
   return (
     <>

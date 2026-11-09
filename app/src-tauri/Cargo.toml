@@ -36,5 +36,10 @@ tracing = "0.1"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
+# The Copy buttons write through the OS pasteboard instead of the webview's
+# `execCommand`, which serializes the whole selection on the main thread (see
+# `clipboard.rs`). Pinned below 2.4: that release wants `tauri ^2.12`, and a
+# Tauri minor bump is not this fix's business.
+tauri-plugin-clipboard-manager = "~2.3.3"
 
 # Release profile lives at the workspace root (Cargo ignores per-package profiles).

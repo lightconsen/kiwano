@@ -28,6 +28,7 @@ mod update;
 pub mod agents;
 pub mod alerts;
 pub mod catalog;
+pub mod clipboard;
 pub mod daemon;
 pub mod dashboard;
 pub mod db;
@@ -81,6 +82,7 @@ pub use agents::{
 };
 pub use alerts::check_usage_alerts;
 pub use catalog::{list_catalog, list_model_prices, open_url};
+pub use clipboard::copy_text;
 pub use daemon::get_gateway_status;
 pub use dashboard::get_dashboard;
 pub use db::get_db_usage;
@@ -123,6 +125,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Registered for its Rust API (`clipboard.rs`), not for its JS commands:
+        // the UI reaches the pasteboard through the app's own `copy_text`, so no
+        // capability entry is involved.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let path = db_path();
@@ -282,6 +288,7 @@ pub fn run() {
             get_gateway_status,
             list_model_prices,
             open_url,
+            copy_text,
             list_providers,
             add_provider,
             update_provider,

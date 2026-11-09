@@ -19,6 +19,22 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Copying a request log no longer freezes the window.** The Copy button went
+  through the webview's `execCommand("copy")`, and WebKit lays the whole
+  selection out and serializes it on the main thread. Bodies are stored in full
+  by default, and a coding agent's request is routinely several megabytes: in a
+  real WKWebView 2 MB blocked the window for 0.5 s, 7 MB for 6.8 s, and 14 MB for
+  37 s — every click on a large log looked like the app had hung. Inside the app
+  the text now goes straight to the OS pasteboard through a native call, whose
+  cost does not depend on the size of the log. The browser demo keeps the web
+  path, and refuses it past 256 KB rather than freezing a page it cannot copy.
+  The small copy buttons in the agent dialogs (endpoint, key, command) go
+  through the same call, which also fixes them: they asked
+  `navigator.clipboard`, which the webview does not provide, so in the app they
+  did nothing at all.
+
 ## [0.4.15] - 2026-11-09
 
 **The version where the route graph says what it costs, and a request looks

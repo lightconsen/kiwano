@@ -15,7 +15,8 @@ import { errText, LoadFailed } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
 import { useT } from "../i18n";
 import type { RequestLogDetail } from "../api/types";
-import { copyText, fmtLogText, fmtTime, LogDetailBody } from "./RequestLogs";
+import { copyText } from "../lib/clipboard";
+import { fmtLogText, fmtTime, LogDetailBody } from "./RequestLogs";
 
 /** The Dashboard, with no tail — the root the page grew up under. */
 const DASHBOARD_HASH = "#dashboard";
@@ -88,12 +89,14 @@ export default function LogDetail({
     return () => window.clearTimeout(timer);
   }, [copyState]);
 
-  const onCopy = () => {
+  // Asynchronous because the write is: inside the app it is one native call to
+  // the pasteboard (`lib/clipboard.ts`). The detail is already loaded, so there
+  // is nothing to wait on before it, and no user-activation window to keep —
+  // which is exactly why a multi-megabyte body no longer freezes the page.
+  const onCopy = async () => {
     if (!row) return;
-    // Synchronous inside the gesture: the detail is already loaded here, so
-    // nothing may await before the clipboard write (WKWebView ends the user
-    // activation window at the first await).
-    setCopyState({ what: copyText(fmtLogText(row, row)) ? "copied" : "failed" });
+    const ok = await copyText(fmtLogText(row, row));
+    setCopyState({ what: ok ? "copied" : "failed" });
   };
 
   const title = t("logs.logTitle", { id: logId });
@@ -174,7 +177,7 @@ export default function LogDetail({
               size="sm"
               className="h-7 shrink-0 gap-1 px-2.5 text-[11px] text-mut"
               disabled={!row}
-              onClick={onCopy}
+              onClick={() => void onCopy()}
             >
               {/* The tick is the in-place response; the word stays "Copy" so the
                   button does not move its own goalpost mid-gesture. */}

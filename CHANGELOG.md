@@ -19,21 +19,31 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.16] - 2026-11-09
+
+**The version where copying a large request log no longer freezes the app.**
+The Copy button on a log's own page wrote through the webview's
+`execCommand("copy")`, and WebKit lays the whole selection out and serializes it
+on the main thread. Bodies are stored in full by default, so a coding agent's
+six-megabyte request is the normal case, and every click on a large log left the
+window answering nothing: measured in a real WKWebView with the same sequence,
+0.5 s at 2 MB, 6.8 s at 7 MB and 37 s at 14 MB. Inside the app the text now goes
+straight to the OS pasteboard, through a call whose cost does not depend on the
+size of the log.
+
 ### Fixed
 
-- **Copying a request log no longer freezes the window.** The Copy button went
-  through the webview's `execCommand("copy")`, and WebKit lays the whole
-  selection out and serializes it on the main thread. Bodies are stored in full
-  by default, and a coding agent's request is routinely several megabytes: in a
-  real WKWebView 2 MB blocked the window for 0.5 s, 7 MB for 6.8 s, and 14 MB for
-  37 s — every click on a large log looked like the app had hung. Inside the app
-  the text now goes straight to the OS pasteboard through a native call, whose
-  cost does not depend on the size of the log. The browser demo keeps the web
-  path, and refuses it past 256 KB rather than freezing a page it cannot copy.
-  The small copy buttons in the agent dialogs (endpoint, key, command) go
-  through the same call, which also fixes them: they asked
-  `navigator.clipboard`, which the webview does not provide, so in the app they
-  did nothing at all.
+- **Copying a request log no longer freezes the window.** The write is native
+  now — a Rust command backed by `tauri-plugin-clipboard-manager`, whose live
+  clipboard also keeps the X11 selection alive past the call. The browser demo
+  keeps the web path, since it has no native side, but refuses it past 256 KB
+  rather than freezing a page it cannot copy.
+
+- **The agent dialogs' copy buttons work in the app.** The small buttons beside
+  an endpoint, a key or a command asked `navigator.clipboard`, which WKWebView
+  does not provide, so the click silently did nothing. They go through the same
+  native call as the log page now, and their tick appears only when the
+  clipboard actually took the value.
 
 ## [0.4.15] - 2026-11-09
 

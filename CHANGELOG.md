@@ -19,6 +19,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.15] - 2026-11-09
+
+**The version where the route graph says what it costs, and a request looks
+like a light.** The picture view on an agent's tab carried names, ranks and
+wires, but none of the table's numbers: it could not say what a period had
+cost, how much of a quota was gone, or whether anything was moving through it.
+Each candidate now carries its billing tag, its amount and its request count
+under its name, and a request is drawn as a light travelling the whole route —
+agent → Kiwano → provider — over wires that stay neutral grey, so the light is
+the only thing that moves.
+
+Two answers for smaller screens in the same release: a request log's Copy
+button says what it did, and Settings reports the database's footprint on disk.
+
 ### Added
 
 - **Settings reports what the database costs on disk.** A row under **Local

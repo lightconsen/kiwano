@@ -42,4 +42,20 @@ tauri-plugin-updater = "2"
 # Tauri minor bump is not this fix's business.
 tauri-plugin-clipboard-manager = "~2.3.3"
 
+# The wake reload (`wake.rs`): the window comes back white from sleep, and the
+# one signal for it is AppKit's own wake notification. Same versions Tauri
+# already depends on, with the two classes that file names.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSNotification",
+    "NSString",
+    "NSObject",
+    "NSOperation",
+    "block2",
+] }
+block2 = "0.6"
+
 # Release profile lives at the workspace root (Cargo ignores per-package profiles).

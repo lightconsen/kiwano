@@ -19,6 +19,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- A window that comes back from sleep is reloaded instead of staying blank. It
+  could return to a white canvas: the display wakes, WebKit judges its GPU
+  process unresponsive and kills it within three seconds, and its replacement is
+  killed the same way, so whatever the page paints afterwards never reaches the
+  window — while its own timers, `requestAnimationFrame`, WebGL context and
+  `fetch` keep working, so nothing in the page can see the state (measured, by
+  killing the GPU process under a live WKWebView). The fix listens for macOS's
+  own wake notes and reloads the window, which is the same recovery as quitting
+  and reopening; the route survives it because it lives in the URL hash. Only an
+  absence of 30 seconds or more reloads, so a display that nodded off between
+  two clicks does not throw the screen away. See `app/src-tauri/src/wake.rs`.
+
 ## [0.4.16] - 2026-11-09
 
 **The version where copying a large request log no longer freezes the app.**

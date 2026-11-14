@@ -2640,9 +2640,13 @@ dependencies = [
 name = "kiwano-app"
 version = "0.4.16"
 dependencies = [
+ "block2",
  "kiwano-api",
  "kiwano-core",
  "kiwanod",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",

@@ -48,6 +48,7 @@ pub mod strategies;
 pub mod takeover;
 pub mod tray;
 pub mod updater;
+pub mod wake;
 
 use std::sync::{Mutex, OnceLock};
 
@@ -246,6 +247,16 @@ pub fn run() {
             // costs one HTTP call. It is not a sync — the daemon's watermark
             // keeps the gateway's own traffic out, and nothing here re-reads it.
             spawn_history_backfill(app.handle().clone());
+
+            // A window that slept can come back blank (the WebKit GPU process
+            // dies on wake); reload it on the OS's own wake note. See `wake`.
+            match app.get_webview_window("main") {
+                Some(window) => {
+                    tracing::info!("watching the system wake notes");
+                    wake::watch(window);
+                }
+                None => tracing::warn!("no main window to watch for wakes"),
+            }
 
             // Tray + login items (the autostart/close_to_tray settings become real from here on)
             app.handle().plugin(tauri_plugin_autostart::init(

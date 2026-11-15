@@ -19,19 +19,35 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.17] - 2026-11-15
+
+**The version where a window that slept comes back drawn, not blank.**
+The window could return from sleep as a white canvas while the page kept
+running — its status bar still moving, its timers and `requestAnimationFrame`
+ticking, `fetch` still answering. What had died was WebKit's GPU process: on
+wake it is judged unresponsive within about three seconds and killed, and its
+replacement is killed the same way, so nothing the page paints afterwards
+reaches the window. Seen twice on one machine — once from hibernate, once from
+a display-only wake where the system never slept. Nothing in the page can see
+that state, which was measured rather than assumed: killing the GPU process
+under a live WKWebView left the document "visible", a WebGL context current, and
+`takeSnapshot` returning fresh images. So the trigger is macOS's own wake
+notification, and the recovery is a reload — the same thing quitting and
+reopening does. The route survives because it lives in the URL hash; a
+half-typed filter does not, and that is the cost.
+
 ### Fixed
 
-- A window that comes back from sleep is reloaded instead of staying blank. It
-  could return to a white canvas: the display wakes, WebKit judges its GPU
-  process unresponsive and kills it within three seconds, and its replacement is
-  killed the same way, so whatever the page paints afterwards never reaches the
-  window — while its own timers, `requestAnimationFrame`, WebGL context and
-  `fetch` keep working, so nothing in the page can see the state (measured, by
-  killing the GPU process under a live WKWebView). The fix listens for macOS's
-  own wake notes and reloads the window, which is the same recovery as quitting
-  and reopening; the route survives it because it lives in the URL hash. Only an
-  absence of 30 seconds or more reloads, so a display that nodded off between
-  two clicks does not throw the screen away. See `app/src-tauri/src/wake.rs`.
+- **A window that comes back from sleep is reloaded instead of staying blank.**
+  The app listens for macOS's `NSWorkspaceDidWakeNotification` and
+  `NSWorkspaceScreensDidWakeNotification` and reloads the window when the
+  absence lasted 30 seconds or more, so a display that nodded off between two
+  clicks does not throw the screen away. Sleep and wake notes are paired rather
+  than timed, because a minimised window is App Napped and stops its timers for
+  minutes at a time (measured: 169 s), which any wall-clock heuristic would
+  misread as a sleep. The pairing also holds the two wake notes of one return to
+  one answer — a system wake raises both. macOS only; Windows and Linux
+  register nothing. See `app/src-tauri/src/wake.rs`.
 
 ## [0.4.16] - 2026-11-09
 

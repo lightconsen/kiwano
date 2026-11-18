@@ -312,6 +312,14 @@ pub enum LogsCmd {
         yes: bool,
     },
 
+    /// Drop the captured bodies of requests that carry a secret, keeping the
+    /// rows themselves
+    ///
+    /// The metadata — when the request ran, which model, what it cost — is not
+    /// the secret; the body is. A redacted row keeps all of that, loses its
+    /// bytes, and gains a note saying the operator removed them.
+    Redact(LogsRedactArgs),
+
     /// Print where the gateway keeps its own log files
     Dir,
 }
@@ -336,6 +344,30 @@ pub struct LogsExportArgs {
 
     #[command(flatten)]
     pub filter: LogFilterArgs,
+}
+
+/// What to redact. The literal comes from a **file** rather than the command
+/// line on purpose: an argument is in the shell's history and in `ps`, and the
+/// whole point of this command is that the string must not be written down
+/// anywhere new.
+#[derive(Debug, Args)]
+pub struct LogsRedactArgs {
+    /// A log id shown by `logs list`, repeatable
+    #[arg(long = "id", value_name = "N")]
+    pub ids: Vec<i64>,
+
+    /// A file holding the secret: every row whose captured body contains its
+    /// text (trimmed) is selected
+    #[arg(long, value_name = "PATH", conflicts_with = "ids")]
+    pub literal_file: Option<PathBuf>,
+
+    /// Report what would be redacted, and redact nothing
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Required: this cannot be undone
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// The shared log filter. `--from` is inclusive and `--to` exclusive, matching

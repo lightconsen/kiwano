@@ -119,8 +119,10 @@ pub struct RequestLogEntry {
     /// Its off-peak equivalent (migration v13) — see `UsageRecord`. Not in the
     /// CSV export: that file states what happened, not what could have.
     pub cost_off_peak: Option<f64>,
-    /// What the compat shim changed about this request (migration v26), one
-    /// line per action; `None` when nothing was touched.
+    /// What the gateway noted about this request (migration v26): the
+    /// credential detector's finding first, then the compat shim's rewrites,
+    /// one line each; `None` when neither said anything. A redacted row gains
+    /// the operator's line here too.
     pub request_notes: Option<String>,
     /// Which entry of the provider's key pool served it (migration v33) — the
     /// `label` of the key, `#<id>` when it has none, or `primary` for the
@@ -631,7 +633,125 @@ impl Store {
         tx.commit()?;
         Ok(n)
     }
+
+    /// The ids whose captured bodies contain `literal`.
+    ///
+    /// A plain substring test over the reassembled bodies, not a pattern: what
+    /// this finds is a secret someone can quote exactly, and a matcher that
+    /// guessed at near-misses would be a second opinion about what a credential
+    /// is. Bodies are read through one [`bodies::BodyReader`] so a session's
+    /// repeated history is decompressed once rather than once per row.
+    ///
+    /// Cost is a full pass over the body table — minutes of CPU on a long-lived
+    /// install's first run, seconds once the pages are warm. That is the price
+    /// of exactness: a chunk-level test would be cheaper and would miss a
+    /// literal that straddles a chunk boundary, which is precisely the case
+    /// that would leave a secret behind.
+    pub fn request_logs_containing(&self, literal: &str) -> Result<Vec<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut reader = bodies::BodyReader::new(&conn);
+        let mut stmt = conn.prepare(
+            "SELECT log_id, request_body, response_body, request_layout, response_layout
+             FROM request_bodies",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut hits = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id: i64 = row.get(0)?;
+            let stored = StoredBodies::from_row(row, 1)?;
+            let (request, response) = stored.materialize_with(&mut reader)?;
+            let found = request.as_deref().is_some_and(|b| b.contains(literal))
+                || response.as_deref().is_some_and(|b| b.contains(literal));
+            if found {
+                hits.push(id);
+            }
+        }
+        Ok(hits)
+    }
+
+    /// Does this row still have a stored body? The dry run's read: a redaction
+    /// that already happened is not one the operator still has to approve.
+    pub fn request_log_has_bodies(&self, id: i64) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM request_bodies WHERE log_id = ?1",
+            params![id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Blank the captured bodies of `ids`, keeping every other column.
+    ///
+    /// The operator's escape hatch for a secret that reached the log. What a
+    /// body holds is not part of the audit trail — when the request ran, which
+    /// model it named, what it cost — so the row that carried one loses its
+    /// bytes and keeps everything else, and the note says so: a detail view that
+    /// simply showed no body would be indistinguishable from a request whose
+    /// capture never ran.
+    ///
+    /// Two details make this a removal rather than a hide. `secure_delete` is on
+    /// for the deletes, so SQLite overwrites the freed pages instead of leaving
+    /// the bytes readable in the file; and the chunks are swept inside the same
+    /// transaction, which is what drops a chunk shared by every row that carried
+    /// the same secret. The WAL is checkpointed afterwards, because until it is
+    /// truncated the old pages are still in `-wal`.
+    ///
+    /// Idempotent: a row whose body is already gone is not counted again, and
+    /// its note is not appended twice — the note rides the delete.
+    pub fn redact_request_bodies(&self, ids: &[i64]) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        conn.pragma_update(None, "secure_delete", true)?;
+        let outcome = (|| -> Result<usize> {
+            let tx = conn.transaction()?;
+            let mut removed = 0usize;
+            {
+                let mut drop_body =
+                    tx.prepare_cached("DELETE FROM request_bodies WHERE log_id = ?1")?;
+                let mut note = tx.prepare_cached(
+                    "UPDATE request_logs
+                        SET request_notes = CASE WHEN request_notes IS NULL THEN ?2
+                                                 ELSE request_notes || char(10) || ?2 END
+                      WHERE id = ?1",
+                )?;
+                for id in ids {
+                    if drop_body.execute(params![id])? > 0 {
+                        removed += 1;
+                        note.execute(params![id, REDACTED_NOTE])?;
+                    }
+                }
+            }
+            if removed > 0 {
+                bodies::sweep(&tx)?;
+            }
+            tx.commit()?;
+            Ok(removed)
+        })();
+        // Back to SQLite's default for every other delete this connection will
+        // run: the cost of zeroing pages belongs to this operation, not to the
+        // retention prune that runs on a timer.
+        let _ = conn.pragma_update(None, "secure_delete", false);
+        let removed = outcome?;
+        if removed > 0 {
+            // Best effort: another connection reading the database keeps the
+            // WAL from truncating, and the operation still succeeded — only the
+            // file's tidiness is short of it. `kiwano db vacuum` finishes that.
+            if let Err(e) = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+                tracing::warn!(error = %e, "could not truncate the WAL after redacting bodies");
+            }
+        }
+        Ok(removed)
+    }
 }
+
+/// The note a redacted row carries, appended to whatever the detector and the
+/// shim already wrote. Phrased as an operator action because that is what it
+/// is: nothing in the request explains it, and a reader must not conclude the
+/// client sent no body.
+const REDACTED_NOTE: &str = "body: redacted by the operator";
 
 /// The two body columns in whichever form the row carries them.
 ///
@@ -1158,5 +1278,115 @@ mod tests {
                 .1,
             0
         );
+    }
+
+    /// The redaction's contract: the body goes, the row stays, and the row says
+    /// why its body is missing.
+    #[test]
+    fn redacting_a_body_keeps_the_row_and_its_metadata() {
+        let (_dir, store) = temp_store();
+        let id = store
+            .insert_request_log(&sample_log(
+                "2026-11-16T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+
+        assert_eq!(store.redact_request_bodies(&[id]).unwrap(), 1);
+
+        let detail = store.get_request_log(id).unwrap().expect("the row stays");
+        assert_eq!(detail.request_body, None, "the bytes are gone");
+        assert_eq!(detail.response_body, None);
+        // Everything the audit trail is actually for survives.
+        assert_eq!(detail.entry.model.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(detail.entry.status_code, 200);
+        assert_eq!(detail.entry.input_tokens, 10);
+        assert_eq!(detail.entry.latency_ms, Some(88));
+        assert_eq!(
+            detail.entry.request_notes.as_deref(),
+            Some(REDACTED_NOTE),
+            "a reader must not conclude the client sent nothing"
+        );
+
+        // Idempotent: the second pass finds no body and appends no second note.
+        assert_eq!(store.redact_request_bodies(&[id]).unwrap(), 0);
+        let again = store.get_request_log(id).unwrap().unwrap();
+        assert_eq!(again.entry.request_notes.as_deref(), Some(REDACTED_NOTE));
+    }
+
+    /// A redaction appends to what the detector and the shim already wrote —
+    /// the finding outlives the bytes it was about.
+    #[test]
+    fn redacting_keeps_the_notes_that_were_already_there() {
+        let (_dir, store) = temp_store();
+        let mut log = sample_log("2026-11-16T10:00:00+00:00", Some("claude"), 200);
+        log.request_notes = Some("dlp: private-key ×1\nthinking: removed invalid value".into());
+        let id = store.insert_request_log(&log).unwrap();
+
+        store.redact_request_bodies(&[id]).unwrap();
+
+        let notes = store
+            .get_request_log(id)
+            .unwrap()
+            .unwrap()
+            .entry
+            .request_notes
+            .unwrap();
+        assert!(notes.starts_with("dlp: private-key ×1"), "{notes}");
+        assert!(notes.contains("thinking: removed invalid value"), "{notes}");
+        assert!(notes.ends_with(REDACTED_NOTE), "{notes}");
+    }
+
+    /// The search half: a literal selects the rows whose captured body holds
+    /// it, and only those.
+    #[test]
+    fn a_literal_finds_the_rows_whose_bodies_carry_it() {
+        let (_dir, store) = temp_store();
+        let clean = store
+            .insert_request_log(&sample_log(
+                "2026-11-16T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+        let mut dirty = sample_log("2026-11-16T11:00:00+00:00", Some("claude"), 200);
+        dirty.request_body = Some(r#"{"prompt":"AKIAIOSFODNN7EXAMPLE"}"#.into());
+        let leaky = store.insert_request_log(&dirty).unwrap();
+        // A body the response side carries, to prove both halves are searched.
+        let mut tail = sample_log("2026-11-16T12:00:00+00:00", Some("claude"), 200);
+        tail.request_body = Some("{}".into());
+        tail.response_body = Some("the answer mentions AKIAIOSFODNN7EXAMPLE".into());
+        let in_response = store.insert_request_log(&tail).unwrap();
+
+        let mut hits = store
+            .request_logs_containing("AKIAIOSFODNN7EXAMPLE")
+            .unwrap();
+        hits.sort();
+        assert_eq!(hits, vec![leaky, in_response]);
+        assert!(!hits.contains(&clean));
+        assert!(store
+            .request_logs_containing("nothing like this")
+            .unwrap()
+            .is_empty());
+    }
+
+    /// The chunks a redaction orphans are collected, not merely unreferenced —
+    /// that is what makes the secret gone from the file rather than hidden.
+    #[test]
+    fn redacting_drops_the_chunks_only_that_body_referenced() {
+        let (_dir, store) = temp_store();
+        let unique = "Z".repeat(40_000);
+        let mut leaky = sample_log("2026-11-16T10:00:00+00:00", Some("claude"), 200);
+        leaky.request_body = Some(unique.clone());
+        let id = store.insert_request_log(&leaky).unwrap();
+        let (_, before) = store.body_chunk_stats().unwrap();
+        assert!(before > 0);
+
+        store.redact_request_bodies(&[id]).unwrap();
+
+        let (chunks, _) = store.body_chunk_stats().unwrap();
+        assert_eq!(chunks, 0, "the only body's chunks should be swept");
+        assert!(!store.request_logs_containing("ZZZZ").unwrap().contains(&id));
     }
 }

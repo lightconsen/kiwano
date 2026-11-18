@@ -1764,6 +1764,122 @@ fn logs_clear_demands_confirmation() {
     assert_eq!(list["total"], 0);
 }
 
+/// The redaction replaces the *body* of a damaging row and keeps the row — the
+/// audit trail loses the secret, not the record that the request happened.
+///
+/// The literal is read from a file rather than the command line on purpose: an
+/// argument is in shell history and in `ps`, and the point of this command is
+/// that the string stops appearing in new places.
+#[test]
+fn logs_redact_drops_the_body_and_keeps_the_row() {
+    let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    {
+        let store = Store::open(&db).unwrap();
+        let mut log = kiwanod::store::RequestLogNew {
+            ts: kiwanod::store::now_rfc3339(),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: Some("claude".into()),
+            attribution: Some("key".into()),
+            provider_id: Some("p1".into()),
+            model: Some("claude-opus-4-8".into()),
+            status_code: 200,
+            error_kind: None,
+            error_message: None,
+            session_id: None,
+            is_streaming: false,
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
+            latency_ms: Some(42),
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: Some(r#"{"prompt":"AKIAIOSFODNN7EXAMPLE"}"#.into()),
+            response_body: Some(r#"{"ok":true}"#.into()),
+            request_size: 33,
+            response_size: 12,
+            truncated: false,
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+            request_notes: None,
+            upstream_key: None,
+            turns: None,
+        };
+        log.request_body = Some(r#"{"prompt":"AKIAIOSFODNN7EXAMPLE"}"#.into());
+        let id = store.insert_request_log(&log).unwrap();
+        assert_eq!(id, 1);
+    }
+    let literal = dir.path().join("secret.txt");
+    std::fs::write(&literal, "AKIAIOSFODNN7EXAMPLE\n").unwrap();
+
+    // A run without --yes is refused, and nothing is touched.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "logs",
+            "redact",
+            "--literal-file",
+            &literal.display().to_string(),
+        ],
+    );
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--yes"), "{err}");
+
+    // A dry run reports and changes nothing.
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "logs",
+            "redact",
+            "--literal-file",
+            &literal.display().to_string(),
+            "--dry-run",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("would redact the bodies of 1 of 1"), "{out}");
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "logs", "show", "1"]);
+    let before: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(before["request_body"].is_string(), "{before}");
+
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "logs",
+            "redact",
+            "--literal-file",
+            &literal.display().to_string(),
+            "--yes",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("redacted the bodies of 1 of 1"), "{out}");
+
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "logs", "show", "1"]);
+    let after: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(after["request_body"].is_null(), "the body is gone: {after}");
+    // The row and its metadata are not.
+    assert_eq!(after["status_code"], 200);
+    assert_eq!(after["input_tokens"], 100);
+    assert!(
+        after["request_notes"]
+            .as_str()
+            .unwrap()
+            .contains("redacted by the operator"),
+        "the row says why its body is missing: {after}"
+    );
+}
+
 #[test]
 fn logs_dir_prints_a_path() {
     let (_dir, db) = temp_db();

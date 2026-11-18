@@ -87,6 +87,22 @@ pub fn clear_request_logs(store: &Store) -> Result<(), String> {
     daemon::clear_request_logs(store).map_err(|e| e.to_string())
 }
 
+/// The rows whose captured bodies contain `literal`.
+pub fn find_log_bodies_containing(store: &Store, literal: &str) -> Result<Vec<i64>, String> {
+    daemon::find_log_bodies_containing(store, literal).map_err(|e| e.to_string())
+}
+
+/// Blank captured bodies, keeping the log rows. See
+/// `kiwanod::store::Store::redact_request_bodies` for what "blank" means.
+pub fn redact_log_bodies(
+    store: &Store,
+    ids: &[i64],
+    literal: Option<&str>,
+    dry_run: bool,
+) -> Result<kiwanod::api::logs::RedactedBodiesVm, String> {
+    daemon::redact_log_bodies(store, ids, literal, dry_run).map_err(|e| e.to_string())
+}
+
 // ── Credential-watch banner (spec: dlp findings surface in-app) ──
 
 /// The newest credential-watch finding the user has not acknowledged — the

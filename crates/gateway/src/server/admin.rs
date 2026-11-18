@@ -197,6 +197,13 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         )
         .route("/logs", get(list_logs_route).delete(clear_logs_route))
         .route("/logs/{id}", get(get_log_route))
+        // The one endpoint whose subject is a secret: `POST` rather than
+        // `DELETE`, because what goes is the body and the row stays. The `GET`
+        // on the same path is the look-before-you-act half.
+        .route(
+            "/logs/redact",
+            get(find_redact_candidates_route).post(redact_logs_route),
+        )
         .route("/credential-finding", get(check_finding_route))
         .route("/credential-finding/ack", post(ack_finding_route))
         .route(
@@ -1152,6 +1159,60 @@ async fn clear_logs_route(State(state): State<Arc<GatewayState>>) -> Response {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => resource_error(e),
     }
+}
+
+/// The redaction request. Both selectors are optional but at least one is
+/// needed; `dry_run` is what makes the destructive call never be the first one
+/// an operator runs.
+#[derive(serde::Deserialize)]
+struct RedactBody {
+    /// Rows already enumerated (by `GET /api/logs/redact?literal=`).
+    #[serde(default)]
+    ids: Vec<i64>,
+    /// A literal whose presence in a captured body selects that row.
+    #[serde(default)]
+    literal: Option<String>,
+    /// Answer with what would be touched, and touch nothing.
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// `POST /api/logs/redact` — drop the captured bodies of the matching rows,
+/// keeping the rows themselves.
+///
+/// The audit trail's metadata (when, which model, what it cost) is not the
+/// secret; the body is. So this is not a delete: the row keeps everything it
+/// says about the request, loses the bytes, and gains a note saying so.
+async fn redact_logs_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<RedactBody>,
+) -> Response {
+    match crate::api::logs::redact_log_bodies(
+        &state.store,
+        &body.ids,
+        body.literal.as_deref(),
+        body.dry_run,
+    ) {
+        Ok(report) => Json(report).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/logs/redact?literal=` — the rows that literal would match, so an
+/// operator can look before they act.
+async fn find_redact_candidates_route(
+    State(state): State<Arc<GatewayState>>,
+    Query(q): Query<RedactQuery>,
+) -> Response {
+    match crate::api::logs::find_log_bodies_containing(&state.store, &q.literal) {
+        Ok(ids) => Json(json!({ "ids": ids, "matched": ids.len() })).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct RedactQuery {
+    literal: String,
 }
 
 /// `GET /api/credential-finding` — the newest unacknowledged finding, or `null`.
@@ -2208,6 +2269,17 @@ mod tests {
         builder.body(Body::empty()).unwrap()
     }
 
+    /// [`admin_request`] with a JSON body, for the routes that take one.
+    fn admin_json_request(uri: &str, token: &str, body: Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(ADMIN_TOKEN_HEADER, token)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
     /// One data-plane POST, with whatever the agent client puts in
     /// `Authorization` (the header every protocol family here accepts, and the
     /// one a real client sends).
@@ -3074,6 +3146,113 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// `POST /api/logs/redact` drops a body and keeps the row it belonged to;
+    /// the `GET` on the same path is the look-before-you-act half.
+    ///
+    /// The route's own contract is the interesting part: it takes a JSON body
+    /// (the only log route that does), and a wrong selector must be a 400
+    /// rather than a redaction of everything.
+    #[tokio::test]
+    async fn redacting_a_body_reaches_the_store_through_the_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        let id = store
+            .insert_request_log(&crate::store::RequestLogNew {
+                ts: crate::store::now_rfc3339(),
+                method: "POST".into(),
+                path: "/v1/messages".into(),
+                query: None,
+                agent: Some("claude".into()),
+                attribution: None,
+                provider_id: Some("p-1".into()),
+                model: Some("m".into()),
+                status_code: 200,
+                error_kind: None,
+                error_message: None,
+                session_id: None,
+                is_streaming: false,
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                reasoning_tokens: 0,
+                usage_missing: false,
+                latency_ms: None,
+                first_token_ms: None,
+                request_headers: None,
+                response_headers: None,
+                request_body: Some(r#"{"key":"AKIAIOSFODNN7EXAMPLE"}"#.into()),
+                response_body: None,
+                request_size: 33,
+                response_size: 0,
+                truncated: false,
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+                request_notes: None,
+                upstream_key: None,
+                turns: None,
+            })
+            .unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        // The search finds the row and echoes only its id.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "GET",
+                "/api/logs/redact?literal=AKIAIOSFODNN7EXAMPLE",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        let found = body_json(response).await;
+        assert_eq!(found["matched"], 1);
+        assert_eq!(found["ids"][0], id);
+
+        // The dry run reports and changes nothing.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_json_request(
+                "/api/logs/redact",
+                &token,
+                json!({ "literal": "AKIAIOSFODNN7EXAMPLE", "dry_run": true }),
+            ))
+            .await
+            .unwrap();
+        let dry = body_json(response).await;
+        assert_eq!(dry["redacted"], 1);
+        assert!(state
+            .store
+            .get_request_log(id)
+            .unwrap()
+            .unwrap()
+            .request_body
+            .is_some());
+
+        // The real run drops it, and the row is still there.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_json_request(
+                "/api/logs/redact",
+                &token,
+                json!({ "literal": "AKIAIOSFODNN7EXAMPLE" }),
+            ))
+            .await
+            .unwrap();
+        let done = body_json(response).await;
+        assert_eq!(done["redacted"], 1);
+        let detail = state.store.get_request_log(id).unwrap().unwrap();
+        assert_eq!(detail.request_body, None);
+        assert_eq!(detail.entry.status_code, 200);
+
+        // No selector at all: refused, because "redact nothing in particular"
+        // is not something an operator can mean.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_json_request("/api/logs/redact", &token, json!({})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     /// The export takes the list's filters and **no** paging, and answers with

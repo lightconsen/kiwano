@@ -19,6 +19,25 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **`kiwano logs redact` — drop a body that carries a secret, keep the row that
+  records it.** The audit trail's metadata (when a request ran, which model,
+  what it cost) is not the secret; the captured body is. So this is not a
+  delete: the matching rows lose their bytes, keep every other column, and gain
+  a note saying the operator removed them — a detail view that simply showed no
+  body would be indistinguishable from a request whose capture never ran. The
+  secret is named through a **file** rather than the command line, because an
+  argument is in the shell's history and in `ps`; `--id` names rows already
+  enumerated, and `--dry-run` reports what would be touched. Over the wire this
+  is `POST /api/logs/redact`, with `GET` on the same path for the search that
+  answers with ids only. Two details make it a removal rather than a hide:
+  `secure_delete` is on for the deletes so SQLite overwrites the freed pages,
+  and the body chunks are swept in the same transaction — which is what drops a
+  chunk shared by every row that carried the same secret. The WAL is
+  checkpointed afterwards, because until it truncates the old pages are still in
+  `-wal`.
+
 ### Fixed
 
 - **A request note is no longer lost when the request is converted or streamed.**

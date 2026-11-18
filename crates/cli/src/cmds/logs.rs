@@ -2,7 +2,7 @@
 
 use super::render::{render_log_detail, render_logs};
 use super::runtime;
-use crate::cli::{LogFilterArgs, LogsCmd};
+use crate::cli::{LogFilterArgs, LogsCmd, LogsRedactArgs};
 use crate::{CliError, Ctx};
 use kiwano_core::vm;
 use kiwanod::store::RequestLogFilter;
@@ -73,6 +73,7 @@ pub fn logs(cmd: &LogsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             ctx.out.line("cleared the request log");
             Ok(())
         }
+        LogsCmd::Redact(args) => logs_redact(args, ctx),
         // Stays local on purpose: this is the log directory on **this** machine,
         // derived from where this invocation keeps its database. A remote daemon
         // writes its logs where *it* lives, and there is no endpoint for a path
@@ -106,4 +107,44 @@ fn log_filter(args: &LogFilterArgs) -> Result<RequestLogFilter<'_>, CliError> {
         to: args.to.as_deref(),
         session_id: args.session.as_deref(),
     })
+}
+
+/// `logs redact` — drop captured bodies that carry a secret, keep the rows.
+fn logs_redact(args: &LogsRedactArgs, ctx: &mut Ctx) -> Result<(), CliError> {
+    // The literal comes from a file, and the file is **not** echoed anywhere:
+    // the whole purpose is that the string stops appearing in new places. What
+    // the user gets back is a count.
+    let literal = match &args.literal_file {
+        Some(path) => Some(
+            std::fs::read_to_string(path)
+                .map_err(|e| runtime(format!("cannot read {}: {e}", path.display())))?
+                .trim()
+                .to_string(),
+        ),
+        None => None,
+    };
+    if args.ids.is_empty() && literal.is_none() {
+        return Err(CliError::usage(
+            "name what to redact: --id <N> (repeatable) or --literal-file <PATH>",
+        ));
+    }
+    if !args.yes && !args.dry_run {
+        return Err(CliError::usage(
+            "this removes captured bodies for good; re-run with --yes to confirm \
+             (or --dry-run to see what it would touch)",
+        ));
+    }
+    let report = ctx
+        .api
+        .redact_log_bodies(&args.ids, literal.as_deref(), args.dry_run)?;
+    let verb = if args.dry_run {
+        "would redact"
+    } else {
+        "redacted"
+    };
+    ctx.out.line(format!(
+        "{verb} the bodies of {} of {} matching rows",
+        report.redacted, report.matched
+    ));
+    Ok(())
 }

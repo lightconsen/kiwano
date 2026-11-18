@@ -596,6 +596,48 @@ impl DaemonApi {
         ))
     }
 
+    /// The rows whose captured bodies contain `literal` — the search half of a
+    /// redaction. The literal travels in the query string, not a body: this is
+    /// a read, and a `GET` is what a caller can see in a log line.
+    pub fn find_log_bodies_containing(&self, literal: &str) -> Result<Vec<i64>, String> {
+        #[derive(serde::Deserialize)]
+        struct Found {
+            ids: Vec<i64>,
+        }
+        let found: Found = sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/logs/redact?literal={}", encode_query(literal)),
+        )?;
+        Ok(found.ids)
+    }
+
+    /// Blank the captured bodies of `ids`, or of the rows `literal` matches —
+    /// `vm::redact_log_bodies`. `dry_run` reports without touching anything.
+    pub fn redact_log_bodies(
+        &self,
+        ids: &[i64],
+        literal: Option<&str>,
+        dry_run: bool,
+    ) -> Result<kiwanod::api::logs::RedactedBodiesVm, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            ids: &'a [i64],
+            literal: Option<&'a str>,
+            dry_run: bool,
+        }
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/logs/redact",
+            &Body {
+                ids,
+                literal,
+                dry_run,
+            },
+        )
+    }
+
     /// The newest unacknowledged credential finding — `vm::check_credential_finding`.
     pub fn check_credential_finding(&self) -> Result<Option<RequestLogEntry>, String> {
         sidecar::admin_get_json(
@@ -1602,6 +1644,56 @@ mod tests {
         );
         // No body on a deletion: the path is the whole request.
         assert!(!request2.contains("Content-Type"), "{request2}");
+    }
+
+    /// The redaction pair: the search is a `GET` whose literal is encoded into
+    /// the query string (a literal with `&` or `=` in it must not become a
+    /// second parameter), and the redaction is a `POST` whose body carries the
+    /// selection.
+    #[test]
+    fn the_redaction_routes_carry_the_literal_where_each_side_expects_it() {
+        let found = r#"{"ids":[7,9],"matched":2}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{found}",
+                found.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir, endpoint, handle) = stub(response);
+        let ids = DaemonApi::with_token(endpoint, Some("tok-1".into()))
+            .find_log_bodies_containing("a&b=c")
+            .unwrap();
+        assert_eq!(ids, vec![7, 9]);
+        let request = handle.join().unwrap();
+        assert!(
+            request.starts_with("GET /api/logs/redact?literal=a%26b%3Dc HTTP/1.1"),
+            "a literal with query syntax in it must be encoded, not spliced: {request}"
+        );
+
+        let report = r#"{"matched":2,"redacted":1}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{report}",
+                report.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir2, endpoint2, handle2) = stub(response);
+        let out = DaemonApi::with_token(endpoint2, Some("tok-1".into()))
+            .redact_log_bodies(&[7, 9], None, false)
+            .unwrap();
+        assert_eq!(out.redacted, 1);
+        assert_eq!(out.matched, 2);
+        let request2 = handle2.join().unwrap();
+        assert!(
+            request2.starts_with("POST /api/logs/redact HTTP/1.1"),
+            "{request2}"
+        );
+        assert!(
+            request2.contains(r#"{"ids":[7,9],"literal":null,"dry_run":false}"#),
+            "{request2}"
+        );
     }
 
     /// A refusal arrives as the daemon's own sentence, not as a status code

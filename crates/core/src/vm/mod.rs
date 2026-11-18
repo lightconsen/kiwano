@@ -82,8 +82,8 @@ pub use limits::{
 };
 pub use logs::{
     ack_credential_finding, check_credential_finding, clear_request_logs, export_request_logs_csv,
-    get_request_log, list_request_logs, write_request_log_export, RequestLogDetailVm,
-    RequestLogExportVm, RequestLogListVm,
+    find_log_bodies_containing, get_request_log, list_request_logs, redact_log_bodies,
+    write_request_log_export, RequestLogDetailVm, RequestLogExportVm, RequestLogListVm,
 };
 pub use provider_edit::{
     add_provider, bind_as_primary, delete_provider, set_provider_enabled, update_provider,

@@ -59,6 +59,81 @@ pub fn clear_request_logs(store: &Store) -> Result<(), ApiError> {
         .map(drop)
 }
 
+/// The ids whose captured bodies contain `literal` — the search half of a
+/// redaction, so an operator can see what a literal would touch before it goes.
+///
+/// The literal itself is not echoed in the answer beyond the ids: the caller
+/// already has it, and an endpoint that repeated a secret back to whoever asked
+/// would be a second copy of the thing being removed.
+pub fn find_log_bodies_containing(store: &Store, literal: &str) -> Result<Vec<i64>, ApiError> {
+    if literal.trim().is_empty() {
+        return Err(ApiError::invalid(
+            "the literal to search for is empty; nothing to look for",
+        ));
+    }
+    store
+        .request_logs_containing(literal)
+        .map_err(ApiError::failed)
+}
+
+/// What a redaction removed. `matched` is how many rows the literal found
+/// (0 on a direct id list, where nothing was searched for) and `redacted` how
+/// many of those still had a body to drop.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RedactedBodiesVm {
+    pub matched: usize,
+    pub redacted: usize,
+}
+
+/// Blank the bodies of `ids`, or of every row whose body contains `literal`.
+///
+/// Both selectors are accepted and neither is required to be alone: the search
+/// names a set the operator may not have enumerated, and the ids name one they
+/// have already looked at. `dry_run` answers with the counts it *would* have
+/// removed, so the destructive call is never the first thing an operator runs.
+pub fn redact_log_bodies(
+    store: &Store,
+    ids: &[i64],
+    literal: Option<&str>,
+    dry_run: bool,
+) -> Result<RedactedBodiesVm, ApiError> {
+    let mut targets: Vec<i64> = ids.to_vec();
+    if let Some(literal) = literal {
+        if literal.trim().is_empty() {
+            return Err(ApiError::invalid(
+                "the literal to redact is empty; name what to remove",
+            ));
+        }
+        for id in store
+            .request_logs_containing(literal)
+            .map_err(ApiError::failed)?
+        {
+            if !targets.contains(&id) {
+                targets.push(id);
+            }
+        }
+    }
+    if targets.is_empty() && literal.is_none() {
+        return Err(ApiError::invalid(
+            "no ids and no literal; that is not a request to redact anything",
+        ));
+    }
+    let matched = targets.len();
+    let redacted = if dry_run {
+        // What would be touched: rows that still have a body row. The dry run
+        // is a report, so it must not change what it measures.
+        targets
+            .iter()
+            .filter(|id| store.request_log_has_bodies(**id).unwrap_or(false))
+            .count()
+    } else {
+        store
+            .redact_request_bodies(&targets)
+            .map_err(ApiError::failed)?
+    };
+    Ok(RedactedBodiesVm { matched, redacted })
+}
+
 // ── Credential-watch banner (spec: dlp findings surface in-app) ──
 
 /// The filtered slice as CSV text — the export's **content** half. The file is
@@ -226,5 +301,110 @@ mod tests {
 
         assert_eq!(check_credential_finding(&store).unwrap(), None);
         assert!(get_request_log(&store, 1).unwrap().is_none());
+    }
+
+    /// A body with a secret in it, as the redaction selects on.
+    fn with_body(store: &Store, body: &str) -> i64 {
+        store
+            .insert_request_log(&crate::store::RequestLogNew {
+                ts: crate::store::now_rfc3339(),
+                method: "POST".into(),
+                path: "/v1/messages".into(),
+                query: None,
+                agent: Some("claude".into()),
+                attribution: None,
+                provider_id: Some("p-1".into()),
+                model: Some("m".into()),
+                status_code: 200,
+                error_kind: None,
+                error_message: None,
+                session_id: None,
+                is_streaming: false,
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                reasoning_tokens: 0,
+                usage_missing: false,
+                latency_ms: None,
+                first_token_ms: None,
+                request_headers: None,
+                response_headers: None,
+                request_body: Some(body.into()),
+                response_body: None,
+                request_size: body.len() as i64,
+                response_size: 0,
+                truncated: false,
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+                request_notes: None,
+                upstream_key: Some("primary".into()),
+                turns: None,
+            })
+            .unwrap()
+    }
+
+    /// A dry run reports and changes nothing; the real run changes what it
+    /// reported. This is the property that makes the destructive call safe to
+    /// reach for.
+    #[test]
+    fn a_dry_run_reports_what_the_real_run_would_redact() {
+        let store = Store::open_in_memory().unwrap();
+        let leaky = with_body(&store, r#"{"key":"AKIAIOSFODNN7EXAMPLE"}"#);
+        with_body(&store, r#"{"key":"nothing to see"}"#);
+
+        let dry = redact_log_bodies(&store, &[], Some("AKIAIOSFODNN7EXAMPLE"), true).unwrap();
+        assert_eq!(dry.matched, 1);
+        assert_eq!(dry.redacted, 1, "the row still has a body to drop");
+        assert!(
+            get_request_log(&store, leaky)
+                .unwrap()
+                .unwrap()
+                .request_body
+                .is_some(),
+            "a dry run must not have dropped anything"
+        );
+
+        let real = redact_log_bodies(&store, &[], Some("AKIAIOSFODNN7EXAMPLE"), false).unwrap();
+        assert_eq!(real, dry);
+        assert_eq!(
+            get_request_log(&store, leaky)
+                .unwrap()
+                .unwrap()
+                .request_body,
+            None
+        );
+    }
+
+    /// Naming nothing is not a request to redact something.
+    #[test]
+    fn redacting_with_no_selector_is_refused() {
+        let store = Store::open_in_memory().unwrap();
+        let err = redact_log_bodies(&store, &[], None, false).unwrap_err();
+        assert_eq!(err.kind(), kiwano_api::error::ApiErrorKind::Invalid);
+        let err = find_log_bodies_containing(&store, "  ").unwrap_err();
+        assert_eq!(err.kind(), kiwano_api::error::ApiErrorKind::Invalid);
+    }
+
+    /// Ids alone are enough: the operator may have enumerated the rows with
+    /// `logs list` and never built a literal.
+    #[test]
+    fn an_id_list_redacts_without_a_search() {
+        let store = Store::open_in_memory().unwrap();
+        let id = with_body(&store, r#"{"key":"whatever"}"#);
+
+        let report = redact_log_bodies(&store, &[id], None, false).unwrap();
+        assert_eq!(
+            report,
+            RedactedBodiesVm {
+                matched: 1,
+                redacted: 1
+            }
+        );
+        assert!(
+            get_request_log(&store, id).unwrap().is_some(),
+            "the row stays"
+        );
     }
 }

@@ -88,6 +88,21 @@ pub async fn forward(
         request_notes: None,
     });
 
+    // The credential detector read the request on the way in (`data.rs`), and
+    // it read the *client's own bytes* — nothing about the finding depends on
+    // which protocol the request ends up travelling as. So its line is set
+    // here, before the endpoint resolution below can hand the request to a
+    // conversion path that returns early and never reaches the shim
+    // composition: those paths rewrite the body with their own converter, so
+    // they never run our shim, and a note composed there would never exist for
+    // them. On a machine whose provider is OpenAI-primary, that is every
+    // `/v1/messages` request — the whole of an agent's day, including the
+    // streamed ones, and therefore every rate at which a finding escaped the
+    // record.
+    if let Some(l) = log.as_mut() {
+        l.request_notes = l.capture.dlp_note.clone();
+    }
+
     // The model the client asked for, read once: the endpoint decision below
     // needs it too (a catalogue that splits its models across endpoints), and
     // the metering path reads the same field for the same reason.
@@ -241,20 +256,18 @@ pub async fn forward(
     } else {
         None
     };
-    // One note field, two sources. The credential detector read the request on
-    // the way in (`data.rs`), and the shim describes what it rewrote here.
-    // Either, both or neither can be present, so this composes rather than
-    // assigns — an assignment would let the shim's silence erase a finding.
-    // Detector first: what left the machine is the more important line.
+    // The detector's line is already on the log (set above, before the
+    // conversion paths could return early); what the shim rewrote is appended
+    // to it. The shim's silence must not erase a finding, so this composes
+    // rather than assigns — and the finding reads first, because what left the
+    // machine outranks what was rewritten on the way.
     if let Some(l) = log.as_mut() {
-        let dlp = l.capture.dlp_note.clone();
-        let shim = shimmed.as_ref().map(|(_, notes)| notes.clone());
-        l.request_notes = match (dlp, shim) {
-            (Some(d), Some(s)) => Some(format!("{d}\n{s}")),
-            (Some(d), None) => Some(d),
-            (None, Some(s)) => Some(s),
-            (None, None) => None,
-        };
+        if let Some((_, shim)) = shimmed.as_ref() {
+            l.request_notes = Some(match l.request_notes.take() {
+                Some(existing) => format!("{existing}\n{shim}"),
+                None => shim.clone(),
+            });
+        }
     }
     let body = shimmed.map_or_else(|| body.clone(), |(b, _)| b);
 

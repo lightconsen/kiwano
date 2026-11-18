@@ -94,6 +94,49 @@ const PEM_HEAD: &str = "-----BEGIN ";
 /// How long a type word may be (`OPENSSH` is the longest in common use).
 const PEM_TYPE_MAX: usize = 16;
 
+/// How much base64 must follow a header before it counts as a key body.
+///
+/// A real PKCS#8 header line is followed by tens of lines of base64 — the
+/// shortest key in common use (an EC P-256 key) is 4 lines. A single line of
+/// 32 characters would match a hash, an id, or a chunk of a table; 80 is more
+/// than any of those and less than any real key's first two lines. Presence is
+/// the question this answers, not completeness: a body the log's own cap cut
+/// in half still started with material, and that is what the finding is about.
+const PEM_BODY_MIN: usize = 80;
+
+/// Is the text at `rest` the beginning of a PEM body?
+///
+/// A body is base64, and JSON writers escape its newlines as the two literal
+/// characters `\n`, so both spellings of a break are allowed. Whitespace is
+/// skipped between lines but not counted; anything else — a closing `）`, a
+/// backtick, an ellipsis, a sentence — means the text is prose *about* a key
+/// rather than one.
+fn pem_body_follows(rest: &str) -> bool {
+    let mut chars = 0usize;
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && bytes.get(i + 1) == Some(&b'n') {
+            i += 2;
+            continue;
+        }
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if !(b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=') {
+            return false;
+        }
+        chars += 1;
+        if chars >= PEM_BODY_MIN {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// At most this many rule lines reach the note: a pathological payload must not
 /// be able to write a kilobyte of prose into a log column. Same spirit as the
 /// shim's own cap, and the overflow is named rather than dropped silently.
@@ -148,7 +191,18 @@ pub fn scan(bytes: &[u8], cap: Option<usize>) -> Vec<Finding> {
         // in it is not a header.
         if let Some(open) = text[..end].rfind(PEM_HEAD) {
             let between = &text[open + PEM_HEAD.len()..end];
-            if between.len() <= PEM_TYPE_MAX && !between.contains('-') {
+            // A header is not a key. Prose that names the marker — an
+            // instruction saying where the file goes, a `.env` template with
+            // the block elided — carries no material, and reporting it would
+            // be a warning about a sentence. This fired on exactly that: a
+            // bare marker inside Chinese setup notes was reported as a private
+            // key leaving the machine, which is how a detector teaches its
+            // reader to ignore it. So the header has to be followed by a body
+            // long enough to be one.
+            if between.len() <= PEM_TYPE_MAX
+                && !between.contains('-')
+                && pem_body_follows(&text[end + PEM_MARKER.len()..])
+            {
                 bump(&mut counts, "private-key");
             }
         }
@@ -224,10 +278,49 @@ mod tests {
                 "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop",
                 "jwt",
             ),
-            ("-----BEGIN RSA PRIVATE KEY-----", "private-key"),
-            ("-----BEGIN OPENSSH PRIVATE KEY-----", "private-key"),
         ] {
             assert_eq!(rules(text), vec![rule], "{text}");
+        }
+    }
+
+    /// The three spellings of a private key header, each with a body behind it.
+    fn pem(header: &str) -> String {
+        format!("{header}\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC6/EPy1Ib2Oovw\\nlQe8SgnQaugEzqsAORW19Yc7ZPj7/Gna5Cte0GFEZDdQbCM5CTbAfVQaUL6Ljn+n\\n")
+    }
+
+    #[test]
+    fn a_private_key_header_with_a_body_fires() {
+        for header in [
+            "-----BEGIN PRIVATE KEY-----",
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "-----BEGIN EC PRIVATE KEY-----",
+        ] {
+            assert_eq!(rules(&pem(header)), vec!["private-key"], "{header}");
+        }
+    }
+
+    /// A header with nothing behind it is a sentence, not a key.
+    ///
+    /// This is the shape that produced a false positive on a real install: an
+    /// instruction saying which file the key goes into names the marker, and
+    /// the detector reported a private key leaving the machine for it. A
+    /// detector that cries wolf over prose is one its reader stops reading.
+    #[test]
+    fn a_private_key_header_alone_is_prose_not_a_finding() {
+        for text in [
+            // The real one, from a Cloudflare setup note.
+            "/etc/ssl/x/origin.key   ← 私钥（-----BEGIN PRIVATE KEY-----）",
+            // The bare marker, quoted.
+            "-----BEGIN PRIVATE KEY-----",
+            // A `.env` template with the block elided.
+            "ALIPAY_PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\"",
+            // The Firebase service-account shape, also elided.
+            "\"private_key\": \"-----BEGIN PRIVATE KEY-----...\"",
+            // A body far too short to be one.
+            "-----BEGIN PRIVATE KEY-----\\nMIGTAgEA\\n-----END PRIVATE KEY-----",
+        ] {
+            assert!(rules(text).is_empty(), "{text}");
         }
     }
 

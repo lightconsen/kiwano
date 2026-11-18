@@ -4400,3 +4400,205 @@ async fn the_session_list_takes_a_caller_computed_bound() {
         "`since` wins over the rolling span"
     );
 }
+
+/// A streamed request keeps the notes a buffered one does.
+///
+/// The compat shim's rewrites happen before the upstream call and the
+/// detector's finding is taken on the way in, so both exist regardless of how
+/// the answer comes back. A streamed row that lost them would leave the one
+/// place a credential finding is recorded — the note — empty for precisely the
+/// traffic a coding agent produces all day.
+#[tokio::test]
+async fn a_streamed_request_keeps_its_request_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured) = mock_anthropic(MockReply::Sse(vec![
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":171}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    ]))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,"thinking":{"type":"disabled"},"messages":[
+            {"role":"user","content":"go"},
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"hmm","signature":"sig"},
+                {"type":"text","text":"done"}]},
+            {"role":"user","content":"here: ghp_abcdefghijklmnopqrstuvwxyz"}
+        ]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    // Drain the stream, which is what ends the request and persists the row.
+    let _ = axum::body::to_bytes(response.into_body(), 1 << 20).await;
+
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().unwrap_or_default();
+    assert!(rows[0].is_streaming, "the row must be the streamed one");
+    assert!(notes.contains("dlp: github-token"), "{notes:?}");
+    assert!(
+        notes.contains("assistant history: removed 1 thinking/redacted_thinking block(s)"),
+        "{notes:?}"
+    );
+}
+
+/// The shape this machine actually runs: an OpenAI-primary provider with a
+/// registered Anthropic endpoint, and Claude Code streaming at `/v1/messages`.
+/// The request never touches the OpenAI side at all, so its notes must be the
+/// same ones a native Anthropic provider would produce.
+#[tokio::test]
+async fn a_streamed_request_on_an_alternate_endpoint_keeps_its_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured) = mock_anthropic(MockReply::Sse(vec![
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    ]))
+    .await;
+    let mut p = provider("p-dual", Protocol::OpenAI, "http://127.0.0.1:1".to_string());
+    p.endpoints = vec![kiwanod::store::ProviderEndpoint {
+        protocol: Protocol::Anthropic,
+        base_url: url,
+        api_path: None,
+    }];
+    store.insert_provider(&p).unwrap();
+    store.upsert_binding(&bind("claude", "p-dual", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,"thinking":{"type":"disabled"},"messages":[
+            {"role":"user","content":"go"},
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"hmm","signature":"sig"},
+                {"type":"text","text":"done"}]},
+            {"role":"user","content":"here: ghp_abcdefghijklmnopqrstuvwxyz"}
+        ]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), 1 << 20).await;
+
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().unwrap_or_default();
+    assert!(rows[0].is_streaming, "the row must be the streamed one");
+    assert!(notes.contains("dlp: github-token"), "{notes:?}");
+    assert!(
+        notes.contains("assistant history: removed 1 thinking/redacted_thinking block(s)"),
+        "{notes:?}"
+    );
+}
+
+/// A converted request keeps the notes too.
+///
+/// The conversion paths (`convert.rs`, `convert_chat.rs`, …) are entered from
+/// `forward` before the shim composition runs, and they hand the log straight
+/// to the stream or the buffered response. So a request that is converted
+/// carried no `dlp:` line and no shim line at all — on a machine whose only
+/// provider is OpenAI-primary with an Anthropic endpoint, that is every
+/// `/v1/messages` request, including the streamed ones an agent sends all day.
+#[tokio::test]
+async fn a_converted_request_keeps_its_request_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    // OpenAI chat upstream — reached through the Anthropic → OpenAI conversion.
+    let (url, _captured) = mock_openai(MockReply::Json(json!({
+        "id": "chatcmpl_1",
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","messages":[
+            {"role":"user","content":"here: ghp_abcdefghijklmnopqrstuvwxyz"}
+        ]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().expect("a note");
+    assert!(notes.contains("dlp: github-token"), "{notes:?}");
+}
+
+/// Conversion, streaming and the shim at once: the case this machine runs.
+///
+/// `/v1/messages` on an OpenAI-primary provider is converted; Claude Code
+/// streams; and the shim's thinking-history rule fires on every turn of a long
+/// conversation. All three have to leave their mark on the one note field.
+#[tokio::test]
+async fn a_streamed_converted_request_keeps_every_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured) = mock_openai(MockReply::Sse(vec![
+        "data: {\"id\":\"c1\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}\n\n",
+        "data: {\"id\":\"c1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n",
+        "data: [DONE]\n\n",
+    ]))
+    .await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,"messages":[
+            {"role":"user","content":"go"},
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"hmm","signature":"sig"},
+                {"type":"text","text":"done"}]},
+            {"role":"user","content":"here: ghp_abcdefghijklmnopqrstuvwxyz"}
+        ]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), 1 << 20).await;
+
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().expect("a note");
+    assert!(notes.contains("dlp: github-token"), "{notes:?}");
+    // The shim itself does not run on the conversion path (the converter owns
+    // the body there), but the finding — the half that says something left the
+    // machine — must always be present.
+    assert!(notes.starts_with("dlp: github-token"), "{notes:?}");
+}

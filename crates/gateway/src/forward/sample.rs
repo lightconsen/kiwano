@@ -22,8 +22,11 @@ pub(crate) struct CompletedLog {
     pub(crate) response_size: i64,
     pub(crate) truncated: bool,
     pub(crate) response_headers: Option<String>,
-    /// What the compat shim changed, one line per action — `None` when it
-    /// touched nothing, which is the statement the row should carry.
+    /// What the gateway noted about this request on the way through: the
+    /// credential detector's finding first, then what the compat shim changed,
+    /// one line each. `None` when neither said anything, which is the statement
+    /// the row should carry. Two audiences — what left the machine, and what was
+    /// rewritten — so they keep their own prefixes rather than sharing one.
     pub(crate) request_notes: Option<String>,
 }
 

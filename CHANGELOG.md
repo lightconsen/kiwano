@@ -19,6 +19,27 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A request note is no longer lost when the request is converted or streamed.**
+  On a machine whose provider is OpenAI-primary with an `anthropic` endpoint
+  row, every `/v1/messages` request travels the conversion path, and those arms
+  return before the compat shim runs and before the note was composed — so
+  `request_notes` was never set for them at all. Every streamed request and
+  every converted one recorded `NULL`, which meant a credential finding on any
+  of them never reached the row the banner reads. The detector's line is now set
+  before the endpoint is resolved, so no path can return past it, and the shim's
+  lines are appended to it rather than assigned over it — what left the machine
+  outranks what was rewritten on the way.
+- **A PEM header alone is no longer a private-key finding.** The detector fired
+  on `-----BEGIN ` followed by `PRIVATE KEY-----`, which is exactly the shape of
+  a marker *quoted in prose* — a Cloudflare origin-certificate instruction, a
+  `.env` template, a Firebase service-account snippet. It now requires a real
+  base64 body (80 characters, JSON `\n`-escapes understood) after the header,
+  and stops at the first byte that is not base64 — a closing parenthesis, a
+  backtick, an ellipsis. Four header spellings with a body still fire; five
+  prose shapes that used to fire no longer do.
+
 ## [0.4.17] - 2026-11-15
 
 **The version where a window that slept comes back drawn, not blank.**

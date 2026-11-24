@@ -44,8 +44,12 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
             home.join(".config").join("opencode").join("opencode.json"),
             kiwano_adapters::gateway_takeover::read_opencode_current,
         ),
-        // MiMo follows the XDG rules for where its global config lives, same
-        // as OpenCode — a moved XDG_CONFIG_HOME moves this file too.
+        // Kilo Code CLI is OpenCode's fork: the same selector and provider
+        // schema, but its global config is merged from up to five files, so
+        // the reader merges them the way Kilo does before resolving (an
+        // unparseable file makes the answer "nothing extractable" rather than
+        // a provider Kilo might not be using).
+        "kilo" => read_kilo_current(home),
         "mimo" => read_additive_one(
             home.join(".config").join("mimocode").join("mimocode.jsonc"),
             kiwano_adapters::gateway_takeover::read_mimo_current,
@@ -276,6 +280,30 @@ fn read_additive_one(
 ) -> Option<CurrentCreds> {
     let content = std::fs::read_to_string(path).ok()?;
     Some(from_additive(read(&content)?))
+}
+
+/// Kilo Code's current provider, resolved the way Kilo resolves it: the global
+/// config directory under the XDG rules, then its five config files merged
+/// lowest priority first. Missing files are simply absent from the merge (that
+/// is what "not written yet" means); an existing file that will not parse is
+/// reported as nothing extractable, because a merge that skipped it could name
+/// a provider Kilo is not actually using.
+fn read_kilo_current(home: &Path) -> Option<CurrentCreds> {
+    use kiwano_adapters::config::{env_dir, EnvDir};
+    let dir = match env_dir("XDG_CONFIG_HOME") {
+        EnvDir::Absolute(dir) => dir.join("kilo"),
+        EnvDir::Unset => home.join(".config").join("kilo"),
+        EnvDir::Relative(_) => return None,
+    };
+    let contents: Vec<String> = kiwano_adapters::gateway_takeover::KILO_CONFIG_FILES
+        .iter()
+        .rev()
+        .filter_map(|name| std::fs::read_to_string(dir.join(name)).ok())
+        .collect();
+    let refs: Vec<&str> = contents.iter().map(String::as_str).collect();
+    Some(from_additive(
+        kiwano_adapters::gateway_takeover::read_kilo_current(&refs)?,
+    ))
 }
 
 /// cline: `~/.cline/data/settings/providers.json`, under the same three levels
@@ -882,5 +910,45 @@ custom_provider:
         let home = temp_home("none");
         assert!(read_current_creds("claude-desktop", &home).is_none());
         assert!(read_current_creds("nonexistent", &home).is_none());
+    }
+
+    /// Kilo Code's import reads the merged view of its config files, not one
+    /// file: the selection and the entry it names can live in different ones.
+    #[test]
+    fn kilo_creds_merge_the_config_files_kilo_reads() {
+        use crate::test_env::EnvGuard;
+
+        let _cleared = EnvGuard::set("XDG_CONFIG_HOME", None);
+        let home = temp_home("kilo");
+        let dir = home.join(".config").join("kilo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.json"),
+            r#"{"provider":{"deepseek":{"npm":"@ai-sdk/openai","options":{"apiKey":"sk-ds"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("opencode.jsonc"),
+            r#"{
+  // the higher-priority file names the provider
+  "model": "deepseek/deepseek-chat"
+}"#,
+        )
+        .unwrap();
+        // ...and the endpoint is in a third file, between them in priority.
+        std::fs::write(
+            dir.join("kilo.jsonc"),
+            r#"{"provider":{"deepseek":{"options":{"baseURL":"https://api.deepseek.com/v1"}}}}"#,
+        )
+        .unwrap();
+
+        let creds = read_current_creds("kilo", &home).expect("a routed configuration");
+        assert_eq!(creds.name.as_deref(), Some("deepseek"));
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(creds.api_key, "sk-ds");
+
+        // A config dir with nothing in it extracts nothing.
+        let empty = temp_home("kilo-empty");
+        assert!(read_current_creds("kilo", &empty).is_none());
     }
 }

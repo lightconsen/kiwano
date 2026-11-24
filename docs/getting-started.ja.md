@@ -9,7 +9,7 @@ Kiwano はコーディングエージェントと AI プロバイダーの間に
 
 - プロバイダーの API キー（OpenAI 互換または Anthropic 互換のエンドポイント）。
 - インストール済みのコーディングエージェントが 1 つ以上 — Claude Code、Codex、
-  Gemini CLI など（組み込みの 26個はすべて
+  Gemini CLI など（組み込みの 27個はすべて
   [エージェントの引き継ぎ](agent-takeover.ja.md)に一覧があります）。
 
 ## 1. インストールと起動

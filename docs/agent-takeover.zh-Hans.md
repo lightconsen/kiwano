@@ -27,6 +27,7 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 | `grokbuild` | `~/.grok/config.toml` | 独占 | 拒绝官方 xAI 登录的配置——先配好自定义模型。 |
 | `claude-desktop` | 两份 `claude_desktop_config.json` + configLibrary profile + `_meta.json` | 独占 | 仅 macOS;把部署模式切到 3p 并写入网关 profile。 |
 | `opencode` | `~/.config/opencode/opencode.json` | 增量 | 走 XDG 规则(`XDG_CONFIG_HOME`)。 |
+| `kilo` | `~/.config/kilo/kilo.jsonc`(或该目录下优先级最高的配置文件) | 增量 | Kilo Code CLI(OpenCode 的分叉):provider schema 相同,配置目录是自己的。Kilo 会合并至多五个全局配置(`config.json`、`kilo.json`、`kilo.jsonc`、`opencode.json`、`opencode.jsonc`,后者覆盖前者),所以接管写的是其中**优先级最高且已存在**的那个——只有写进它,改写才真正生效;而它必须带上的选择器要跨文件读出,因为 `model` 选择器和端点常常分处不同的文件。认 `XDG_CONFIG_HOME`;不认 `KILO_CONFIG`、`KILO_CONFIG_DIR`、`KILO_CONFIG_CONTENT`(它们是附加输入,不是全局配置的搬迁)。 |
 | `openclaw` | `~/.openclaw/openclaw.json` + `agents/<id>/agent/models.json` | 增量 | 目录文件承载主配置校验器不接受的会话亲和标志。 |
 | `hermes` | `~/.hermes/config.yaml` | 增量 | 认 `HERMES_HOME`。 |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | 增量 | 选择写在 settings 里。 |
@@ -53,7 +54,7 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 接管通过用户的**登录 shell**环境解析路径(GUI 应用本来也看不见 rc 文件
 导出的东西)。变量被设成*相对*路径时直接拒绝,而不是猜。
 
-认: `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`XDG_CONFIG_HOME`(opencode、
+认: `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`XDG_CONFIG_HOME`(opencode、kilo、
 mimo、crush;Linux 上的 goose)、`HERMES_HOME`、`WORKBUDDY_CONFIG_DIR`、
 `CODEBUDDY_CONFIG_DIR`、`QWEN_HOME`、`KIMI_CODE_HOME`(及旧版
 `KIMI_SHARE_DIR`)、`CLINE_PROVIDER_SETTINGS_PATH`、`CLINE_DATA_DIR`、

@@ -1,49 +1,32 @@
 //! OpenCode: the gateway entry (an OpenAI-compatible provider) and the
 //! top-level `model` selector that names it.
+//!
+//! The transform itself is shared with Kilo Code, OpenCode's fork, which kept
+//! the schema — see [`super::openai_compatible`]. What is OpenCode's own here is
+//! the file name, which is also the label its parse errors carry.
 
-use crate::gateway_takeover::gateway::{GATEWAY_LABEL, GATEWAY_PROVIDER_ID};
-use crate::gateway_takeover::json::{object_field, parse_jsonc, require_object};
-use serde_json::{json, Value};
+use crate::gateway_takeover::openai_compatible::upsert_openai_compatible_provider;
 
 // ── opencode (~/.config/opencode/opencode.json, JSONC) ──
+
+/// The file OpenCode reads its global config from. Only one file: OpenCode's
+/// own config-path resolution has no candidate list — a missing `opencode.json`
+/// is a config with nothing in it, and the takeover creates it.
+pub(crate) const OPENCODE_CONFIG_FILE: &str = "opencode.json";
 
 /// Upsert the gateway provider (`npm: @ai-sdk/openai-compatible`) and rewrite
 /// the top-level `model: "<provider>/<model>"` selector to route through the
 /// gateway, keeping the user's model id. A missing or non-slash-form `model`
 /// key is left alone (the user picks a gateway model in the OpenCode UI).
 pub fn upsert_opencode_gateway(content: &str, base_url: &str, key: &str) -> Result<String, String> {
-    let root = parse_jsonc(content, "opencode.json")?;
-    let mut obj = require_object(root, "opencode.json")?;
-
-    // provider section: normalize to an object before inserting the entry
-    object_field(&mut obj, "opencode.json", "provider");
-    let entry = json!({
-        "npm": "@ai-sdk/openai-compatible",
-        "name": GATEWAY_LABEL,
-        "options": { "baseURL": base_url, "apiKey": key },
-        "models": {},
-    });
-    obj["provider"][GATEWAY_PROVIDER_ID] = entry;
-
-    // selection: "<old-provider>/<model>" → "kiwano-gateway/<model>"
-    if let Some(model_id) = obj
-        .get("model")
-        .and_then(Value::as_str)
-        .and_then(|m| m.split_once('/'))
-        .map(|(_, id)| id)
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
-    {
-        obj["provider"][GATEWAY_PROVIDER_ID]["models"][&model_id] = json!({});
-        obj["model"] = json!(format!("{GATEWAY_PROVIDER_ID}/{model_id}"));
-    }
-
-    serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())
+    upsert_openai_compatible_provider(content, OPENCODE_CONFIG_FILE, base_url, key)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gateway_takeover::GATEWAY_PROVIDER_ID;
+    use serde_json::Value;
 
     #[test]
     fn opencode_upserts_entry_and_rewrites_model_prefix() {

@@ -8,7 +8,7 @@ Kiwano 位於你的編碼 Agent 與 AI 供應商之間:供應商註冊一次,本
 
 - 一個供應商 API Key(OpenAI 相容或 Anthropic 相容端點)。
 - 一個或多個已安裝的編碼 Agent——Claude Code、Codex、Gemini CLI……
-  (全部 26 個內建 Agent 見 [Agent 接管](agent-takeover.zh-Hant.md))。
+  (全部 27 個內建 Agent 見 [Agent 接管](agent-takeover.zh-Hant.md))。
 
 ## 1. 安裝並啟動
 

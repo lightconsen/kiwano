@@ -4,13 +4,14 @@
 use kiwanod::api::agents as daemon;
 use kiwanod::store::Store;
 
-pub const AGENTS: [(&str, &str); 26] = [
+pub const AGENTS: [(&str, &str); 27] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
     ("gemini", "Gemini CLI"),
     ("grokbuild", "Grok Build"),
     ("claude-desktop", "Claude Desktop"),
     ("opencode", "OpenCode"),
+    ("kilo", "Kilo Code"),
     ("openclaw", "OpenClaw"),
     ("hermes", "Hermes"),
     ("pi", "Pi"),
@@ -114,13 +115,14 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
 /// **A label.** Nothing routes, validates or filters by it: the gateway learns
 /// an inbound's protocol from the path it was called on
 /// (`gateway::protocol::classify_path`), and that is unchanged.
-pub const AGENT_PROTOCOLS: [(&str, &[&str]); 26] = [
+pub const AGENT_PROTOCOLS: [(&str, &[&str]); 27] = [
     ("claude", &["anthropic"]),
     ("codex", &["openai"]),
     ("gemini", &["gemini"]),
     ("grokbuild", &["openai"]),
     ("claude-desktop", &["anthropic"]),
     ("opencode", &["openai"]),
+    ("kilo", &["openai"]),
     ("openclaw", &["openai"]),
     ("hermes", &["openai"]),
     ("pi", &["openai"]),
@@ -157,8 +159,9 @@ pub fn agent_protocols(agent: &str) -> &'static [&'static str] {
 /// Additive-mode agents: their native config keeps multiple providers
 /// coexisting, so takeover writes a gateway-pointed provider entry and selects
 /// it, instead of replacing an exclusive provider slot like the other five.
-pub const ADDITIVE_AGENTS: [&str; 19] = [
+pub const ADDITIVE_AGENTS: [&str; 20] = [
     "opencode",
+    "kilo",
     "openclaw",
     "hermes",
     "pi",

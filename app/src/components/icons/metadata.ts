@@ -16,6 +16,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   droid: { name: "droid", displayName: "Droid", defaultColor: "currentColor" },
   goose: { name: "goose", displayName: "Goose", defaultColor: "currentColor" },
   zai: { name: "zai", displayName: "Z.ai", defaultColor: "currentColor" },
+  kilo: { name: "kilo", displayName: "Kilo Code", defaultColor: "currentColor" },
   omp: { name: "omp", displayName: "oh-my-pi", defaultColor: "currentColor" },
   commandcode: { name: "commandcode", displayName: "Command Code", defaultColor: "currentColor" },
   dsh: { name: "dsh", displayName: "DeepSeek Harness", defaultColor: "#4D6BFE" },

@@ -97,9 +97,9 @@ pub(crate) fn rewrite(
         "claude-desktop" => claude_desktop_rewrite(path, original, target, key),
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
-        "opencode" | "openclaw" | "hermes" | "pi" | "omp" | "workbuddy" | "codebuddy" | "qwen"
-        | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" | "commandcode"
-        | "dsh" | "hanaagent" => {
+        "opencode" | "kilo" | "openclaw" | "hermes" | "pi" | "omp" | "workbuddy" | "codebuddy"
+        | "qwen" | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid"
+        | "commandcode" | "dsh" | "hanaagent" => {
             additive_rewrite(agent, path, original, target, key, now, sibling_config)
         }
         // goose's three files are one endpoint split across formats, each by
@@ -181,6 +181,23 @@ fn additive_rewrite(
     match agent {
         "opencode" => {
             kiwano_adapters::gateway_takeover::upsert_opencode_gateway(original, target, key)
+        }
+        // Kilo is OpenCode's fork and kept the provider schema, so the entry is
+        // the same one. Which file it goes into is `paths`'s business — this
+        // transform only sees the bytes of the file it was handed. The
+        // selection it must carry may come from another of Kilo's five config
+        // files, handed over as `sibling_config` (see compute_rewrites).
+        "kilo" => {
+            // The label is the file this rewrite was handed, so a parse error
+            // names the file the user has to fix rather than a fixed default.
+            let label = path.rsplit('/').next().unwrap_or(path);
+            kiwano_adapters::gateway_takeover::upsert_kilo_gateway(
+                original,
+                label,
+                target,
+                key,
+                sibling_config,
+            )
         }
         "openclaw" if path.ends_with("models.json") => {
             kiwano_adapters::gateway_takeover::upsert_openclaw_models_json(

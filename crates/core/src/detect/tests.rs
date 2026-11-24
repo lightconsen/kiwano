@@ -73,6 +73,20 @@ fn version_manager_children_are_searched() {
     );
 }
 
+/// Kilo Code's own installer drops the binary in `$HOME/.kilo/bin`, which is
+/// not a shared prefix — without this the walk only sees an npm install.
+#[test]
+fn kilos_installer_directory_is_searched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let expected = write_bin(&home.join(".kilo/bin"), "kilo");
+
+    assert_eq!(
+        search_binary_in("kilo", &bare_env(home)).as_deref(),
+        Some(expected.as_path())
+    );
+}
+
 /// A tool-specific environment override is honored.
 #[test]
 fn an_env_override_directory_is_searched() {

@@ -29,6 +29,7 @@ export const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[]
   { id: "grokbuild", icon: "grok" },
   { id: "claude-desktop", icon: "claude" },
   { id: "opencode", icon: "opencode" },
+  { id: "kilo", icon: "kilo" },
   { id: "openclaw", icon: "openclaw" },
   { id: "hermes", icon: "hermes" },
   { id: "pi", icon: "pi" },

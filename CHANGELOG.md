@@ -21,6 +21,30 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **Kilo Code CLI is a built-in agent.** `@kilocode/cli` (the `kilo` /
+  `kilocode` binary) is OpenCode's fork: same provider schema, so the takeover
+  writes the same `@ai-sdk/openai-compatible` entry and rewrites the
+  `<provider>/<model>` selection, keeping the user's model id. What differs is
+  where the file is — `$XDG_CONFIG_HOME/kilo` — and which one: Kilo merges up to
+  five global configs (`config.json`, `kilo.json`, `kilo.jsonc`,
+  `opencode.json`, `opencode.jsonc`, later winning), so the takeover picks the
+  highest-priority one that exists, the only file a rewrite can take effect
+  from, and creates `kilo.jsonc` when there is none. Because the selection can
+  sit in a *different* one of those files than the endpoint (a common split:
+  `model` in `kilo.jsonc`, `provider` options in `opencode.json`), the merged
+  selector is read across the rest of them and carried into the file being
+  written — otherwise the entry would land and select nothing, leaving the
+  agent on its old provider while the UI said it was taken over. Kilo's own
+  writer, by
+  contrast, targets the first of `kilo.jsonc`/`kilo.json`/`opencode.jsonc`/
+  `opencode.json`/`config.json`, which is not the same order — copying it would
+  have put the entry in a file something else overrides. The first-takeover
+  import merges the same files in the same order before resolving the selector,
+  and reports nothing extractable if any of them will not parse, rather than
+  importing a provider Kilo might not be using. `KILO_CONFIG`,
+  `KILO_CONFIG_DIR` and `KILO_CONFIG_CONTENT` are not honored, for the reason
+  OpenCode's two config variables are not: they add inputs, they do not move the
+  global config. That makes 27 built-ins.
 - **`kiwano logs redact` — drop a body that carries a secret, keep the row that
   records it.** The audit trail's metadata (when a request ran, which model,
   what it cost) is not the secret; the captured body is. So this is not a

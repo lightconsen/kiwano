@@ -32,6 +32,7 @@ cannot silently drift from what a build does.
 | `grokbuild` | `~/.grok/config.toml` | exclusive | Refuses the official xAI login config — set up a custom model first. |
 | `claude-desktop` | two `claude_desktop_config.json` + configLibrary profile + `_meta.json` | exclusive | macOS only; flips deployment mode to 3p and writes a gateway profile. |
 | `opencode` | `~/.config/opencode/opencode.json` | additive | XDG rules (`XDG_CONFIG_HOME`). |
+| `kilo` | `~/.config/kilo/kilo.jsonc` (or the highest-priority config that exists there) | additive | Kilo Code CLI, OpenCode's fork: same provider schema, its own config directory. Kilo merges up to five global files (`config.json`, `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc` — later wins), so the takeover writes the highest-priority one that exists, the only file a rewrite can take effect from; the selection it must carry is read across the other files, since the `model` selector and the endpoint commonly sit in different ones. `XDG_CONFIG_HOME` honored; `KILO_CONFIG`, `KILO_CONFIG_DIR` and `KILO_CONFIG_CONTENT` are not (they add inputs rather than move the global config). |
 | `openclaw` | `~/.openclaw/openclaw.json` + `agents/<id>/agent/models.json` | additive | The catalogue file declares the session-affinity flag the main config's validator rejects. |
 | `hermes` | `~/.hermes/config.yaml` | additive | `HERMES_HOME` honored. |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | additive | The settings file carries the selection. |

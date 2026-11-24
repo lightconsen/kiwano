@@ -66,6 +66,10 @@ import _zetaapiDark from "./zetaapi-icon-dark.png";
 import _together from "./together.svg?url";
 
 export const icons: Record<string, string> = {
+  // Kiwano addition: Kilo Code's own mark, from its VS Code extension's
+  // assets (`packages/kilo-vscode/assets/icons/kilo-light.svg`) — the yellow
+  // pixel glyph on its black tile, size-normalized to the registry's 1em.
+  kilo: `<svg fill="none" height="1em" style="flex:none;line-height:1" viewBox="0 0 512 512" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Kilo Code</title><path d="M512 0H0V512H512V0Z" fill="#000000"></path><path d="M322 377H377V421H307.857L278 391.143V322H322V377ZM421 307.857L391.143 278H322V322L377 322V377H421V307.857ZM234 278H190V322H234V278ZM91 391.143L120.857 421H234V377H135V278H91V391.143ZM371.172 189.999V120.856L341.315 90.9995H278V135H327.172V189.999H278V233.999H421V189.999H371.172ZM135 91H91V233.999H135V184.5H190V233.999H234V184.5L190 140.5H135V91ZM234 91H190V140.5H234V91Z" fill="#FFDD00"></path></svg>`,
   // Kiwano addition: Z.ai's mark from lobehub/lobe-icons (packages/static-svg) —
   // ZCode is Z.ai's coding agent, so the vendor mark doubles as the agent's.
   zai: `<svg fill="currentColor" fill-rule="evenodd" height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Z.ai</title><path d="M12.105 2L9.927 4.953H.653L2.83 2h9.276zM23.254 19.048L21.078 22h-9.242l2.174-2.952h9.244zM24 2L9.264 22H0L14.736 2H24z"></path></svg>`,

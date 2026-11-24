@@ -153,6 +153,7 @@ pub(crate) mod test_support {
                 "codex" => ".codex/auth.json",
                 "grokbuild" => ".grok/config.toml",
                 "opencode" => ".config/opencode/opencode.json",
+                "kilo" => ".config/kilo/kilo.jsonc",
                 "openclaw" => ".openclaw/openclaw.json",
                 "hermes" => ".hermes/config.yaml",
                 "pi" => ".pi/agent/settings.json",

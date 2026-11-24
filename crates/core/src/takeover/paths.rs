@@ -75,6 +75,18 @@ pub(crate) fn takeover_paths(
         "opencode" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
             .join("opencode")
             .join("opencode.json")]),
+        // Kilo Code CLI is an OpenCode fork: same XDG root rule, its own app
+        // directory, and — unlike OpenCode — a *set* of global config files
+        // that Kilo merges in a fixed order. The takeover writes the
+        // highest-priority one that exists, because that is the only file a
+        // rewrite there can take effect from; see the adapter module for the
+        // order and for why Kilo's own write target is not the same file.
+        "kilo" => {
+            let dir = config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?.join("kilo");
+            Ok(vec![kiwano_adapters::gateway_takeover::kilo_config_file(
+                &dir,
+            )])
+        }
         // The second file is OpenClaw's custom model catalogue — the takeover
         // declares the selected model there because the catalogue's schema is
         // the only one that accepts the session-affinity compat flag: the main

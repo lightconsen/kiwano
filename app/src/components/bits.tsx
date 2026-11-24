@@ -11,6 +11,7 @@ export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   grokbuild: "grok",
   "claude-desktop": "claude",
   opencode: "opencode",
+  kilo: "kilo",
   openclaw: "openclaw",
   hermes: "hermes",
   pi: "pi",

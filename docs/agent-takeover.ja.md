@@ -32,6 +32,7 @@
 | `grokbuild` | `~/.grok/config.toml` | 排他型 | 公式 xAI ログインの設定は拒否します — 先にカスタムモデルを設定してください。 |
 | `claude-desktop` | 2 つの `claude_desktop_config.json` + configLibrary プロファイル + `_meta.json` | 排他型 | macOS のみ。デプロイモードを 3p に切り替え、ゲートウェイのプロファイルを書き込みます。 |
 | `opencode` | `~/.config/opencode/opencode.json` | 追加型 | XDG の規則に従います（`XDG_CONFIG_HOME`）。 |
+| `kilo` | `~/.config/kilo/kilo.jsonc`(またはそのディレクトリで最も優先度の高い設定ファイル) | 追加型 | Kilo Code CLI(OpenCode のフォーク):provider スキーマは同じで、設定ディレクトリは独自です。Kilo は最大 5 つのグローバル設定(`config.json`、`kilo.json`、`kilo.jsonc`、`opencode.json`、`opencode.jsonc`、後者が優先)をマージするため、引き継ぎは**存在する中で最も優先度の高い**ファイルに書き込みます — そこに書かないと書き換えが効きません。また、そこに書き込むべき選択子は他のファイルから読み出します — `model` 選択子とエンドポイントは別のファイルにあることが多いためです。`XDG_CONFIG_HOME` を認識し、`KILO_CONFIG`、`KILO_CONFIG_DIR`、`KILO_CONFIG_CONTENT` は認識しません(これらは追加の入力であり、グローバル設定の移動ではありません)。 |
 | `openclaw` | `~/.openclaw/openclaw.json` + `agents/<id>/agent/models.json` | 追加型 | カタログファイルが、メイン設定のバリデータでは弾かれるセッション親和のフラグを宣言します。 |
 | `hermes` | `~/.hermes/config.yaml` | 追加型 | `HERMES_HOME` を認識します。 |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | 追加型 | 選択は settings ファイルが保持します。 |
@@ -59,7 +60,7 @@
 rc ファイルが export した内容をそもそも見られません）。*相対*パスが設定されている
 変数は、推測せず拒否します。
 
-認識する: `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`XDG_CONFIG_HOME`（opencode、mimo、
+認識する: `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`XDG_CONFIG_HOME`（opencode、kilo、mimo、
 crush、Linux の goose）、`HERMES_HOME`、`WORKBUDDY_CONFIG_DIR`、
 `CODEBUDDY_CONFIG_DIR`、`QWEN_HOME`、`KIMI_CODE_HOME`（および旧来の
 `KIMI_SHARE_DIR`）、`CLINE_PROVIDER_SETTINGS_PATH`、`CLINE_DATA_DIR`、

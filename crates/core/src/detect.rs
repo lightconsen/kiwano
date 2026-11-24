@@ -53,6 +53,7 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("gemini", "gemini"),
     ("grokbuild", "grok"),
     ("opencode", "opencode"),
+    ("kilo", "kilo"),
     ("openclaw", "openclaw"),
     ("hermes", "hermes"),
     ("pi", "pi"),
@@ -507,6 +508,16 @@ fn search_paths(name: &str, env: &SearchEnv) -> Vec<PathBuf> {
                 push_unique(&mut paths, entry.join("bin"));
             }
         }
+    }
+
+    // Kilo Code's own installer (`curl -fsSL https://kilo.ai/cli/install |
+    // bash`) drops the binary in `$HOME/.kilo/bin` and, unless told not to,
+    // appends that directory to the shell's rc file — so the login-shell probe
+    // usually finds it, and this is the fallback for a GUI process that has not
+    // seen a new rc line yet. `npm install -g @kilocode/cli` lands in a shared
+    // prefix instead and is covered by the walk below.
+    if name == "kilo" {
+        push_unique(&mut paths, home.join(".kilo").join("bin"));
     }
 
     // The shared per-user prefixes: where `pip install --user`, `npm -g` with a

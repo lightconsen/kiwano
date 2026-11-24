@@ -38,13 +38,14 @@ pub struct PromptLatencyVm {
 /// Here because both sides label rows with it — the daemon's dashboard, the
 /// client's everything-else — and a table copied to two crates is a table that
 /// disagrees with itself the first time an agent is added.
-pub const AGENTS: [(&str, &str); 26] = [
+pub const AGENTS: [(&str, &str); 27] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
     ("gemini", "Gemini CLI"),
     ("grokbuild", "Grok Build"),
     ("claude-desktop", "Claude Desktop"),
     ("opencode", "OpenCode"),
+    ("kilo", "Kilo Code"),
     ("openclaw", "OpenClaw"),
     ("hermes", "Hermes"),
     ("pi", "Pi"),

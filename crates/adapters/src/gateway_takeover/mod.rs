@@ -56,11 +56,13 @@ pub mod goose;
 pub mod hanaagent;
 pub mod hermes;
 pub mod json;
+pub mod kilo;
 pub mod kimi;
 pub mod mcode;
 pub mod mimo;
 pub mod model_list;
 pub mod omp;
+pub mod openai_compatible;
 pub mod openclaw;
 pub mod opencode;
 pub mod pi;
@@ -95,6 +97,10 @@ pub use hanaagent::{
     HANA_CATALOG_FILE,
 };
 pub use hermes::upsert_hermes_gateway;
+pub use kilo::{
+    kilo_config_file, kilo_merged_model_id, read_kilo_current, read_kilo_merged_model_id,
+    upsert_kilo_gateway, KILO_CONFIG_FILES,
+};
 pub use kimi::upsert_kimi_gateway;
 pub use mcode::{read_mcode_current, upsert_mcode_gateway};
 pub use mimo::{read_mimo_current, upsert_mimo_gateway};

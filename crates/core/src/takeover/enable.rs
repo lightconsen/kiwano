@@ -97,6 +97,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                 if matches!(
                     agent,
                     "opencode"
+                        | "kilo"
                         | "openclaw"
                         | "hermes"
                         | "pi"
@@ -241,6 +242,25 @@ fn compute_rewrites(
     } else {
         None
     };
+    // Kilo merges up to five config files but the takeover writes one — the
+    // highest-priority one that exists. The selector the user set commonly
+    // lives in another of them, so the merged model id is read out of the
+    // *other files as they still are on disk* (every write happens after this,
+    // see `write_rewrites`) and handed over: without it the written file gains
+    // the entry and still selects nothing, which would leave the agent on its
+    // old provider while the UI said it was taken over. The file being written
+    // is excluded, so a selector of its own — which wins Kilo's merge — stays
+    // the one the rewrite keeps.
+    let kilo_selection = if agent == "kilo" {
+        originals.first().and_then(|f| {
+            let path = std::path::Path::new(&f.path);
+            path.parent().and_then(|dir| {
+                kiwano_adapters::gateway_takeover::read_kilo_merged_model_id(dir, Some(path))
+            })
+        })
+    } else {
+        None
+    };
     let omp_config = if agent == "omp" {
         originals
             .iter()
@@ -265,7 +285,8 @@ fn compute_rewrites(
                         .or(goose_selection)
                         .or(omp_config)
                         .or(commandcode_settings)
-                        .or(hana_models.as_deref()),
+                        .or(hana_models.as_deref())
+                        .or(kilo_selection.as_deref()),
                 )?,
             ))
         })
@@ -280,7 +301,7 @@ fn compute_rewrites(
 /// that append nothing at all need the full route in the URL.
 pub(crate) fn gateway_target(agent: &str, gateway: &str) -> String {
     let suffix = match agent {
-        "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
+        "codex" | "grokbuild" | "opencode" | "kilo" | "pi" => "/v1",
         // Kimi and Qwen want the version root; their clients append the route.
         "kimi" | "qwen" => "/v1",
         // MiMo Code passes its custom baseURL straight to an OpenAI SDK, which
@@ -867,6 +888,151 @@ base_url = "https://relay.example.com/v1"
             original
         );
         assert!(aux.load_takeover_backup("opencode").is_none());
+    }
+
+    /// Kilo Code CLI: OpenCode's fork with its own config directory, and a
+    /// config file picked from a priority list rather than named outright.
+    #[test]
+    fn kilo_takeover_roundtrip_additive() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".config").join("kilo");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Two of Kilo's five config files: the higher-priority one carries the
+        // selection, the lower one the endpoint it names.
+        let low = r#"{
+  "provider": { "deepseek": { "npm": "@ai-sdk/openai", "options": { "apiKey": "sk-old" } } }
+}"#;
+        let high = r#"{
+  "model": "deepseek/deepseek-chat"
+}"#;
+        std::fs::write(dir.join("config.json"), low).unwrap();
+        std::fs::write(dir.join("opencode.json"), high).unwrap();
+
+        enable(
+            &aux,
+            "kilo",
+            "kw-ag-kilo-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+
+        // The write lands in the file that wins Kilo's merge, and the file a
+        // lower-priority one is not touched.
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("opencode.json")).unwrap())
+                .unwrap();
+        assert_eq!(v["model"], "kiwano-gateway/deepseek-chat");
+        assert_eq!(
+            v["provider"]["kiwano-gateway"]["options"]["baseURL"],
+            "http://127.0.0.1:8317/v1"
+        );
+        assert_eq!(
+            v["provider"]["kiwano-gateway"]["options"]["apiKey"],
+            "kw-ag-kilo-abcd"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.json")).unwrap(),
+            low,
+            "the untouched file keeps its bytes"
+        );
+
+        restore(&aux, "kilo", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("opencode.json")).unwrap(),
+            high,
+            "restore = write back byte for byte"
+        );
+        assert!(aux.load_takeover_backup("kilo").is_none());
+    }
+
+    /// The selector commonly sits in a lower-priority file than the endpoint,
+    /// so the written file must inherit it — otherwise the takeover adds an
+    /// entry and selects nothing, and the agent keeps its old provider.
+    #[test]
+    fn kilo_takeover_carries_a_selector_from_another_config_file() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".config").join("kilo");
+        std::fs::create_dir_all(&dir).unwrap();
+        // The layout a real user ends up with: key in the lowest-priority file,
+        // selector in kilo.jsonc, endpoint in opencode.json (which wins).
+        let low = r#"{"provider":{"deepseek":{"options":{"apiKey":"sk-old"}}}}"#;
+        let middle = r#"{"model":"deepseek/deepseek-chat"}"#;
+        let high =
+            r#"{"provider":{"deepseek":{"options":{"baseURL":"https://api.deepseek.com/v1"}}}}"#;
+        std::fs::write(dir.join("config.json"), low).unwrap();
+        std::fs::write(dir.join("kilo.jsonc"), middle).unwrap();
+        std::fs::write(dir.join("opencode.json"), high).unwrap();
+
+        enable(
+            &aux,
+            "kilo",
+            "kw-ag-kilo-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("opencode.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["model"], "kiwano-gateway/deepseek-chat",
+            "the selector from kilo.jsonc reaches the file that wins the merge"
+        );
+        assert!(
+            v["provider"]["kiwano-gateway"]["models"]["deepseek-chat"].is_object(),
+            "the gateway declares the selected model"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("kilo.jsonc")).unwrap(),
+            middle,
+            "the file the selector came from is not rewritten"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.json")).unwrap(),
+            low
+        );
+
+        restore(&aux, "kilo", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("opencode.json")).unwrap(),
+            high,
+            "restore = write back byte for byte"
+        );
+    }
+
+    /// With none of Kilo's config files present, the takeover creates
+    /// `kilo.jsonc` — the name Kilo's own writer falls back to.
+    #[test]
+    fn kilo_takeover_creates_the_file_kilo_would() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+
+        enable(
+            &aux,
+            "kilo",
+            "kw-ag-kilo-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+
+        let path = home.join(".config").join("kilo").join("kilo.jsonc");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            v["provider"]["kiwano-gateway"]["options"]["apiKey"],
+            "kw-ag-kilo-abcd"
+        );
+        assert!(v.get("model").is_none(), "no selection is invented");
+
+        restore(&aux, "kilo", &home).unwrap();
+        assert!(!path.exists(), "the file we created is removed again");
     }
 
     // ── workbuddy / codebuddy / kimi / qwen ──

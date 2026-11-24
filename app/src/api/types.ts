@@ -15,6 +15,7 @@ export type AgentId =
   | "grokbuild"
   | "claude-desktop"
   | "opencode"
+  | "kilo"
   | "openclaw"
   | "hermes"
   | "pi"
@@ -79,6 +80,7 @@ export interface AgentMeta {
     writes a gateway entry and selects it (vs exclusive-switch mode). */
 export const ADDITIVE_AGENTS: AgentId[] = [
   "opencode",
+  "kilo",
   "openclaw",
   "hermes",
   "pi",
@@ -106,6 +108,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "grokbuild", label: "Grok Build", chip_char: "X", chip_color: "#1A1A1A", chip_border: true },
   { id: "claude-desktop", label: "Claude Desktop", chip_char: "D", chip_color: "#B45E51" },
   { id: "opencode", label: "OpenCode", chip_char: "O", chip_color: "#7C3AED" },
+  { id: "kilo", label: "Kilo Code", chip_char: "K", chip_color: "#FFDD00" },
   { id: "openclaw", label: "OpenClaw", chip_char: "L", chip_color: "#EA580C" },
   { id: "hermes", label: "Hermes", chip_char: "H", chip_color: "#8B5CF6" },
   { id: "pi", label: "Pi", chip_char: "P", chip_color: "#DB2777" },

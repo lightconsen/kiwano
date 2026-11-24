@@ -19,6 +19,23 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.18] - 2026-11-24
+
+**The version that adds a 27th agent, and a way to take a secret out of the
+audit trail.** Kilo Code CLI is OpenCode's fork — same provider schema, its own
+config directory — and it joins the built-in list, with the one wrinkle that it
+merges up to five global config files and the model selector need not live in
+the same one as the endpoint; the takeover reads the selector across them and
+writes the file that actually wins. And `kiwano logs redact` answers a request
+that has been in the way of too many operators: a captured body that holds a
+key should not stay in the database, but neither should the record that the
+request happened disappear. The row keeps its columns and loses its bytes.
+
+The two fixes in this release are both about not believing a shape. A gateway
+note that was composed on one path and overwritten on another is now set before
+any path can return past it; a PEM *header* quoted in prose is no longer read as
+a private key.
+
 ### Added
 
 - **Kilo Code CLI is a built-in agent.** `@kilocode/cli` (the `kilo` /
@@ -35,13 +52,12 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   selector is read across the rest of them and carried into the file being
   written — otherwise the entry would land and select nothing, leaving the
   agent on its old provider while the UI said it was taken over. Kilo's own
-  writer, by
-  contrast, targets the first of `kilo.jsonc`/`kilo.json`/`opencode.jsonc`/
-  `opencode.json`/`config.json`, which is not the same order — copying it would
-  have put the entry in a file something else overrides. The first-takeover
-  import merges the same files in the same order before resolving the selector,
-  and reports nothing extractable if any of them will not parse, rather than
-  importing a provider Kilo might not be using. `KILO_CONFIG`,
+  writer, by contrast, targets the first of `kilo.jsonc`/`kilo.json`/
+  `opencode.jsonc`/`opencode.json`/`config.json`, which is not the same order —
+  copying it would have put the entry in a file something else overrides. The
+  first-takeover import merges the same files in the same order before resolving
+  the selector, and reports nothing extractable if any of them will not parse,
+  rather than importing a provider Kilo might not be using. `KILO_CONFIG`,
   `KILO_CONFIG_DIR` and `KILO_CONFIG_CONTENT` are not honored, for the reason
   OpenCode's two config variables are not: they add inputs, they do not move the
   global config. That makes 27 built-ins.

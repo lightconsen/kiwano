@@ -89,7 +89,7 @@ export const ja: Record<string, string> = {
   "fq1.t": "Kiwano とは何ですか?",
   "fq1.d": "無料・オープンソースのローカル優先 AI プロバイダーマネージャーです。デスクトップアプリとローカル API ゲートウェイで、コーディング Agent のリクエストを任意の AI プロバイダーへルーティングします——クラウドは経由しません。macOS、Windows、Linux に対応。",
   "fq2.t": "どのコーディング Agent に対応していますか?",
-  "fq2.d": "現在 26 個です:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/ja/agent-takeover/\">各 Agent の base_url をワンクリックでゲートウェイに向けられます</a>。スイッチを切ればいつでも元の設定に戻せます。",
+  "fq2.d": "現在 27 個です:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、Kilo Code、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/ja/agent-takeover/\">各 Agent の base_url をワンクリックでゲートウェイに向けられます</a>。スイッチを切ればいつでも元の設定に戻せます。",
   "fq3.t": "ローカルゲートウェイはどう動きますか?",
   "fq3.d": "常駐する 1 つのポート <code>127.0.0.1:8317</code> が Anthropic と OpenAI のプロトコルを正規化し、リクエストごとにルーティング、計測、障害時の切り替えを行います。Agent の設定は一度きりで、以降プロバイダーを替えても設定ファイルに触れる必要はありません。",
   "fq4.t": "1 つの Agent で複数のプロバイダーを使えますか?",

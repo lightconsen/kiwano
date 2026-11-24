@@ -84,7 +84,7 @@ export const zhHans: Record<string, string> = {
   "fq1.t": "Kiwano 是什么?",
   "fq1.d": "免费开源、本地优先的 AI 供应商管理器:桌面应用加本地 API 网关,把编码 Agent 的请求路由到任意 AI 供应商——不经过任何云端。支持 macOS、Windows、Linux。",
   "fq2.t": "支持哪些编码 Agent?",
-  "fq2.d": "目前 26 个:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/zh-Hans/agent-takeover/\">一键把每个 Agent 的 base_url 指向网关</a>;关掉开关随时还原原始配置。",
+  "fq2.d": "目前 27 个:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、Kilo Code、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/zh-Hans/agent-takeover/\">一键把每个 Agent 的 base_url 指向网关</a>;关掉开关随时还原原始配置。",
   "fq3.t": "本地网关是怎么工作的?",
   "fq3.d": "一个常驻端口 <code>127.0.0.1:8317</code>,归一化 Anthropic 与 OpenAI 协议,逐请求路由、计量,故障自动转移。Agent 配置一次到位——之后换供应商不再碰它的配置文件。",
   "fq4.t": "一个 Agent 能同时用多家供应商吗?",

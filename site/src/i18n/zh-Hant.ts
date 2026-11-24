@@ -87,7 +87,7 @@ export const zhHant: Record<string, string> = {
   "fq1.t": "Kiwano 是什麼?",
   "fq1.d": "免費開源、本機優先的 AI 供應商管理器:桌面應用加上本機 API 閘道,把編碼 Agent 的請求路由到任意 AI 供應商——不經過任何雲端。支援 macOS、Windows、Linux。",
   "fq2.t": "支援哪些編碼 Agent?",
-  "fq2.d": "目前 26 個:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/zh-Hant/agent-takeover/\">一鍵把每個 Agent 的 base_url 指向閘道</a>;關掉開關隨時還原原始設定。",
+  "fq2.d": "目前 27 個:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、Kilo Code、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/zh-Hant/agent-takeover/\">一鍵把每個 Agent 的 base_url 指向閘道</a>;關掉開關隨時還原原始設定。",
   "fq3.t": "本機閘道是怎麼運作的?",
   "fq3.d": "一個常駐連接埠 <code>127.0.0.1:8317</code>,正規化 Anthropic 與 OpenAI 協定,逐請求路由、計量,故障自動移轉。Agent 設定一次到位——之後換供應商不再碰它的設定檔。",
   "fq4.t": "一個 Agent 能同時用多家供應商嗎?",

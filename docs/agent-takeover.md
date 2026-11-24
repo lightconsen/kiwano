@@ -61,7 +61,7 @@ GUI app cannot see what rc files export otherwise). A variable that is set to
 a *relative* path is refused rather than guessed at.
 
 Honored: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME` (opencode,
-mimo, crush; goose on Linux), `HERMES_HOME`, `WORKBUDDY_CONFIG_DIR`,
+kilo, mimo, crush; goose on Linux), `HERMES_HOME`, `WORKBUDDY_CONFIG_DIR`,
 `CODEBUDDY_CONFIG_DIR`, `QWEN_HOME`, `KIMI_CODE_HOME` (+ legacy
 `KIMI_SHARE_DIR`), `CLINE_PROVIDER_SETTINGS_PATH`, `CLINE_DATA_DIR`,
 `CLINE_DIR`, `MCODE_CONFIG_DIR`, `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`.

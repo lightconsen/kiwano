@@ -250,6 +250,12 @@ code, pre { font-family: var(--font-mono); }
 <td>XDG の規則に従います（<code>XDG_CONFIG_HOME</code>）。</td>
 </tr>
 <tr>
+<td><code>kilo</code></td>
+<td><code>~/.config/kilo/kilo.jsonc</code>(またはそのディレクトリで最も優先度の高い設定ファイル)</td>
+<td>追加型</td>
+<td>Kilo Code CLI(OpenCode のフォーク):provider スキーマは同じで、設定ディレクトリは独自です。Kilo は最大 5 つのグローバル設定(<code>config.json</code>、<code>kilo.json</code>、<code>kilo.jsonc</code>、<code>opencode.json</code>、<code>opencode.jsonc</code>、後者が優先)をマージするため、引き継ぎは<strong>存在する中で最も優先度の高い</strong>ファイルに書き込みます — そこに書かないと書き換えが効きません。また、そこに書き込むべき選択子は他のファイルから読み出します — <code>model</code> 選択子とエンドポイントは別のファイルにあることが多いためです。<code>XDG_CONFIG_HOME</code> を認識し、<code>KILO_CONFIG</code>、<code>KILO_CONFIG_DIR</code>、<code>KILO_CONFIG_CONTENT</code> は認識しません(これらは追加の入力であり、グローバル設定の移動ではありません)。</td>
+</tr>
+<tr>
 <td><code>openclaw</code></td>
 <td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
 <td>追加型</td>
@@ -374,7 +380,7 @@ code, pre { font-family: var(--font-mono); }
 <p>引き継ぎはユーザーの<strong>ログインシェル</strong>の環境を通してパスを解決します（GUI アプリは
 rc ファイルが export した内容をそもそも見られません）。<em>相対</em>パスが設定されている
 変数は、推測せず拒否します。</p>
-<p>認識する: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>（opencode、mimo、
+<p>認識する: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>（opencode、kilo、mimo、
 crush、Linux の goose）、<code>HERMES_HOME</code>、<code>WORKBUDDY_CONFIG_DIR</code>、
 <code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>（および旧来の
 <code>KIMI_SHARE_DIR</code>）、<code>CLINE_PROVIDER_SETTINGS_PATH</code>、<code>CLINE_DATA_DIR</code>、

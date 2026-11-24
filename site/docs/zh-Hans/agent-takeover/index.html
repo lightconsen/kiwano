@@ -248,6 +248,12 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 <td>走 XDG 规则(<code>XDG_CONFIG_HOME</code>)。</td>
 </tr>
 <tr>
+<td><code>kilo</code></td>
+<td><code>~/.config/kilo/kilo.jsonc</code>(或该目录下优先级最高的配置文件)</td>
+<td>增量</td>
+<td>Kilo Code CLI(OpenCode 的分叉):provider schema 相同,配置目录是自己的。Kilo 会合并至多五个全局配置(<code>config.json</code>、<code>kilo.json</code>、<code>kilo.jsonc</code>、<code>opencode.json</code>、<code>opencode.jsonc</code>,后者覆盖前者),所以接管写的是其中<strong>优先级最高且已存在</strong>的那个——只有写进它,改写才真正生效;而它必须带上的选择器要跨文件读出,因为 <code>model</code> 选择器和端点常常分处不同的文件。认 <code>XDG_CONFIG_HOME</code>;不认 <code>KILO_CONFIG</code>、<code>KILO_CONFIG_DIR</code>、<code>KILO_CONFIG_CONTENT</code>(它们是附加输入,不是全局配置的搬迁)。</td>
+</tr>
+<tr>
 <td><code>openclaw</code></td>
 <td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
 <td>增量</td>
@@ -371,7 +377,7 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 <h2 id="环境变量">环境变量</h2>
 <p>接管通过用户的<strong>登录 shell</strong>环境解析路径(GUI 应用本来也看不见 rc 文件
 导出的东西)。变量被设成<em>相对</em>路径时直接拒绝,而不是猜。</p>
-<p>认: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、
+<p>认: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、kilo、
 mimo、crush;Linux 上的 goose)、<code>HERMES_HOME</code>、<code>WORKBUDDY_CONFIG_DIR</code>、
 <code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>(及旧版
 <code>KIMI_SHARE_DIR</code>)、<code>CLINE_PROVIDER_SETTINGS_PATH</code>、<code>CLINE_DATA_DIR</code>、

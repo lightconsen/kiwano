@@ -248,6 +248,12 @@ Agent 集合與這些路徑由一致性測試釘住(docs 表格 ↔ 內建登錄
 <td>走 XDG 規則(<code>XDG_CONFIG_HOME</code>)。</td>
 </tr>
 <tr>
+<td><code>kilo</code></td>
+<td><code>~/.config/kilo/kilo.jsonc</code>(或該目錄下優先級最高的設定檔)</td>
+<td>增補</td>
+<td>Kilo Code CLI(OpenCode 的分支):provider schema 相同,設定目錄是自己的。Kilo 會合併至多五個全域設定(<code>config.json</code>、<code>kilo.json</code>、<code>kilo.jsonc</code>、<code>opencode.json</code>、<code>opencode.jsonc</code>,後者覆蓋前者),所以接管寫的是其中<strong>優先級最高且已存在</strong>的那個——只有寫進它,改寫才真正生效;而它必須帶上的選擇器要跨檔案讀出,因為 <code>model</code> 選擇器和端點常常分處不同的檔案。認 <code>XDG_CONFIG_HOME</code>;不認 <code>KILO_CONFIG</code>、<code>KILO_CONFIG_DIR</code>、<code>KILO_CONFIG_CONTENT</code>(它們是附加輸入,不是全域設定的搬遷)。</td>
+</tr>
+<tr>
 <td><code>openclaw</code></td>
 <td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
 <td>增補</td>
@@ -371,7 +377,7 @@ Agent 集合與這些路徑由一致性測試釘住(docs 表格 ↔ 內建登錄
 <h2 id="環境變數">環境變數</h2>
 <p>接管透過使用者的<strong>登入 shell</strong> 環境解析路徑(GUI 應用程式本來也看不見 rc
 檔匯出的東西)。變數被設成<em>相對</em>路徑時直接拒絕,而不是猜。</p>
-<p>認: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、
+<p>認: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、kilo、
 mimo、crush;Linux 上的 goose)、<code>HERMES_HOME</code>、<code>WORKBUDDY_CONFIG_DIR</code>、
 <code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>(及舊版
 <code>KIMI_SHARE_DIR</code>)、<code>CLINE_PROVIDER_SETTINGS_PATH</code>、<code>CLINE_DATA_DIR</code>、

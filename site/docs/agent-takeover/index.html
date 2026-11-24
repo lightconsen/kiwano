@@ -250,6 +250,12 @@ a second entry.</li>
 <td>XDG rules (<code>XDG_CONFIG_HOME</code>).</td>
 </tr>
 <tr>
+<td><code>kilo</code></td>
+<td><code>~/.config/kilo/kilo.jsonc</code> (or the highest-priority config that exists there)</td>
+<td>additive</td>
+<td>Kilo Code CLI, OpenCode&#39;s fork: same provider schema, its own config directory. Kilo merges up to five global files (<code>config.json</code>, <code>kilo.json</code>, <code>kilo.jsonc</code>, <code>opencode.json</code>, <code>opencode.jsonc</code> — later wins), so the takeover writes the highest-priority one that exists, the only file a rewrite can take effect from; the selection it must carry is read across the other files, since the <code>model</code> selector and the endpoint commonly sit in different ones. <code>XDG_CONFIG_HOME</code> honored; <code>KILO_CONFIG</code>, <code>KILO_CONFIG_DIR</code> and <code>KILO_CONFIG_CONTENT</code> are not (they add inputs rather than move the global config).</td>
+</tr>
+<tr>
 <td><code>openclaw</code></td>
 <td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
 <td>additive</td>
@@ -375,7 +381,7 @@ a second entry.</li>
 GUI app cannot see what rc files export otherwise). A variable that is set to
 a <em>relative</em> path is refused rather than guessed at.</p>
 <p>Honored: <code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>, <code>XDG_CONFIG_HOME</code> (opencode,
-mimo, crush; goose on Linux), <code>HERMES_HOME</code>, <code>WORKBUDDY_CONFIG_DIR</code>,
+kilo, mimo, crush; goose on Linux), <code>HERMES_HOME</code>, <code>WORKBUDDY_CONFIG_DIR</code>,
 <code>CODEBUDDY_CONFIG_DIR</code>, <code>QWEN_HOME</code>, <code>KIMI_CODE_HOME</code> (+ legacy
 <code>KIMI_SHARE_DIR</code>), <code>CLINE_PROVIDER_SETTINGS_PATH</code>, <code>CLINE_DATA_DIR</code>,
 <code>CLINE_DIR</code>, <code>MCODE_CONFIG_DIR</code>, <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>.</p>

@@ -378,7 +378,7 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, _event| {
             // Deliberately no kill-on-exit: the gateway daemon outlives the
             // GUI (tech.md §2.4 B). The next launch adopts it via admin ping.
             //
@@ -387,13 +387,15 @@ pub fn run() {
             // with nothing visible, answer the way the tray's "Open Kiwano"
             // would. Done only when the window is hidden — a reopen of the
             // already-visible window must not pull it away from its screen.
+            // The leading underscores are for the other two platforms, where
+            // the arm below compiles out and both bindings go unused.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
                 has_visible_windows: false,
                 ..
-            } = event
+            } = _event
             {
-                tray::show_main(app_handle);
+                tray::show_main(_app_handle);
             }
         });
 }

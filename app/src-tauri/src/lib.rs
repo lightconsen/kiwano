@@ -68,7 +68,7 @@ use crate::history::spawn_history_backfill;
 use crate::hub::spawn_hub_sync;
 use crate::paths::{db_path, env_port, local_db_path, resolved_db};
 use crate::state::AppState;
-use crate::tray::{setup_tray, sync_autostart};
+use crate::tray::{set_dock_tile, setup_tray, sync_autostart};
 use crate::updater::record_update_check;
 
 // ── the command surface, one arm per module ──
@@ -368,13 +368,32 @@ pub fn run() {
                 if vm::ui_settings(&state.store).close_to_tray {
                     api.prevent_close();
                     let _ = window.hide();
+                    // Hiding the window is not hiding the app on macOS: the Dock
+                    // tile is the process's, so it would sit there as if the app
+                    // were still open. Take it away with the window — the tray
+                    // is the remaining way in (`show_main` hands it back).
+                    set_dock_tile(window.app_handle(), false);
                 }
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, _event| {
+        .run(|app_handle, event| {
             // Deliberately no kill-on-exit: the gateway daemon outlives the
             // GUI (tech.md §2.4 B). The next launch adopts it via admin ping.
+            //
+            // Reopening a closed-to-tray app (`open -a Kiwano`, the login item)
+            // has no Dock tile to click, so macOS asks the delegate instead;
+            // with nothing visible, answer the way the tray's "Open Kiwano"
+            // would. Done only when the window is hidden — a reopen of the
+            // already-visible window must not pull it away from its screen.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                tray::show_main(app_handle);
+            }
         });
 }

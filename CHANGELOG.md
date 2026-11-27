@@ -19,6 +19,21 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Closing the window on macOS now takes the app out of the Dock too.** The
+  close-to-tray setting hid the window but left the Dock tile, so a "closed"
+  app still looked open there — and clicking the tile did nothing a window
+  could show. The window's close now switches the app to
+  `NSApplicationActivationPolicyAccessory` (no Dock tile, no menu bar, tray
+  still there), and the tray's *Open Kiwano* switches it back to `Regular`
+  before showing the window, because an accessory app's window arrives without
+  a Dock tile or a menu bar. Reopening the closed app (`open -a Kiwano`) takes
+  the same path as the tray item. The policy routes through
+  `setActivationPolicy`, not tao's `TransformProcessType`-based dock visibility,
+  which deliberately ignores a hide issued within a second of a show — a quick
+  close-after-open would have left the tile behind.
+
 ## [0.4.18] - 2026-11-24
 
 **The version that adds a 27th agent, and a way to take a secret out of the

@@ -202,7 +202,40 @@ pub(crate) fn refresh_tray<R: tauri::Runtime>(
     Ok(())
 }
 
-fn show_main<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+/// macOS: the Dock tile that goes with the window, and comes back with it.
+///
+/// A window hidden with `Accessory` keeps the process and its status item but
+/// loses the Dock tile and the app menu — which is what "closed" should look
+/// like for a tray app; a hidden window with a tile still in the Dock reads as
+/// an app that is somehow both running and gone. The policy belongs to the
+/// running process, not the window, so it has to be handed back *before* the
+/// window is shown: an `Accessory` app can put a window on screen, but it
+/// would arrive without a Dock tile and without its menu bar (Cmd-Q included).
+///
+/// This maps to `NSApplication.setActivationPolicy`, the same pair Electron's
+/// `app.dock.hide()` / `show()` drive. tao's `set_dock_visibility` is the older
+/// route (`TransformProcessType` to UIElement) and deliberately ignores a hide
+/// called within a second of a show, so a quick close-after-open would leave
+/// the tile behind — exactly the complaint this fixes.
+#[cfg(target_os = "macos")]
+pub(crate) fn set_dock_tile<R: tauri::Runtime>(app: &tauri::AppHandle<R>, visible: bool) {
+    let policy = if visible {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    if let Err(error) = app.set_activation_policy(policy) {
+        tracing::warn!(%error, visible, "could not change the macOS activation policy");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn set_dock_tile<R: tauri::Runtime>(_app: &tauri::AppHandle<R>, _visible: bool) {}
+
+pub(crate) fn show_main<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // Back into the Dock first: the window becomes key and orders front below,
+    // and on macOS that activation is what the policy is attached to.
+    set_dock_tile(app, true);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();

@@ -15,7 +15,7 @@ Kiwano 位于你的编码 Agent 与 AI 供应商之间:供应商注册一次,本
 从 [Releases](https://github.com/lightconsen/kiwano/releases/latest) 下载
 对应平台的签名安装包(macOS / Windows / Linux)。首次启动会拉起 **守护进程**
 ——本地网关,它的生命周期独立于 GUI 窗口:关掉 App,网关仍在服务。托盘图标
-显示其状态。
+显示其状态——在 macOS 上,关窗后留下的也正是它,Dock 图标会随窗口一起消失。
 
 ## 2. 注册供应商
 

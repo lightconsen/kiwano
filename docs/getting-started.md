@@ -17,7 +17,8 @@ Download the signed build for your platform from
 [Releases](https://github.com/lightconsen/kiwano/releases/latest) (macOS,
 Windows, Linux) or `brew install` if you use Homebrew. The first launch
 starts the **daemon** — the local gateway — which outlives the GUI window:
-closing the app leaves the gateway serving. A tray icon shows it is up.
+closing the app leaves the gateway serving. A tray icon shows it is up — on
+macOS that tray item is all that remains, the Dock tile leaves with the window.
 
 ## 2. Register a provider
 

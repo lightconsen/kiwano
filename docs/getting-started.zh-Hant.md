@@ -15,7 +15,8 @@ Kiwano 位於你的編碼 Agent 與 AI 供應商之間:供應商註冊一次,本
 從 [Releases](https://github.com/lightconsen/kiwano/releases/latest) 下載
 對應平台的簽章安裝檔(macOS / Windows / Linux);若你用 Homebrew,也可以
 `brew install`。首次啟動會拉起 **常駐程式**——本機閘道,它的生命週期獨立於
-GUI 視窗:關掉 App,閘道仍在服務。系統匣圖示顯示它正在運作。
+GUI 視窗:關掉 App,閘道仍在服務。系統匣圖示顯示它正在運作——在 macOS 上,
+關窗後留下的也只有它,Dock 圖示會隨視窗一起消失。
 
 ## 2. 註冊供應商
 

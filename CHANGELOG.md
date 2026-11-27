@@ -19,6 +19,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.4.19] - 2026-11-27
+
+**The version where closing the window also closes the Dock icon.** A tray app
+that keeps a tile in the Dock is telling two stories about itself: the tile says
+open, the missing window says closed, and clicking the tile did nothing at all
+because there was no window left to raise. macOS puts the Dock tile on the
+*process*, not the window, so hiding the window was never going to take it
+away. Now the close switches the app's activation policy — tray item stays, Dock
+tile and menu bar go — and every way back in (the tray's *Open Kiwano*, `open -a
+Kiwano`) hands the policy back before the window is shown.
+
 ### Fixed
 
 - **Closing the window on macOS now takes the app out of the Dock too.** The
